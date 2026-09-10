@@ -1,0 +1,63 @@
+import React from 'react';
+import { NavLink } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { 
+  LayoutDashboard, 
+  FileText, 
+  CheckSquare, 
+  Users, 
+  Building2, 
+  BarChart3, 
+  Mail, 
+  ShieldCheck 
+} from 'lucide-react';
+
+export default function Sidebar() {
+  const { user, hasPermission } = useAuth();
+
+  const navItems = [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
+    { to: '/documents', label: 'Document Repository', icon: FileText, show: true },
+    { to: '/reviews', label: 'Workflow Reviews', icon: CheckSquare, show: hasPermission('approve_reject') || hasPermission('final_approve') },
+    { to: '/users', label: 'Users & Roles', icon: Users, show: hasPermission('manage_users') || user?.is_super_admin },
+    { to: '/organizations', label: 'Tenant Organizations', icon: Building2, show: user?.is_super_admin },
+    { to: '/reports', label: 'Analytics & Reports', icon: BarChart3, show: hasPermission('view_reports') },
+    { to: '/emails', label: 'Email Outbox Logs', icon: Mail, show: true },
+    { to: '/audit-logs', label: 'System Audit Logs', icon: ShieldCheck, show: hasPermission('view_audit_logs') }
+  ];
+
+  return (
+    <aside className="w-64 bg-slate-900 text-slate-300 min-h-[calc(100vh-4rem)] p-4 flex flex-col justify-between border-r border-slate-800 shrink-0">
+      <div className="space-y-6">
+
+        {/* Navigation Items */}
+        <nav className="space-y-1">
+          {navItems.filter(item => item.show).map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `flex items-center space-x-3 px-3.5 py-2.5 rounded-xl font-semibold text-xs transition ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-900/30'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                  }`
+                }
+              >
+                <Icon className="w-4 h-4 shrink-0" />
+                <span>{item.label}</span>
+              </NavLink>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Footer Info */}
+      <div className="pt-4 border-t border-slate-800 text-[11px] text-slate-500 text-center font-mono">
+        Enterprise DMS v2.0 &bull; 2026
+      </div>
+    </aside>
+  );
+}
