@@ -94,24 +94,13 @@ export default function DocumentPreviewModal({ isOpen, onClose, document, onDown
               </button>
             )}
 
-            {isFinalApproved ? (
-              <button
-                disabled
-                title="Download is disabled for Final Approved documents"
-                className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-700 text-slate-400 rounded-lg text-xs font-semibold cursor-not-allowed opacity-75 border border-slate-600"
-              >
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                <span>Download Locked</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => onDownload(document)}
-                className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition shadow-sm"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Download Original File</span>
-              </button>
-            )}
+            <button
+              onClick={() => onDownload(document)}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition shadow-sm"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Original File</span>
+            </button>
 
             <button
               onClick={onClose}

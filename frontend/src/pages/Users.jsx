@@ -16,6 +16,8 @@ export default function Users() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [roleId, setRoleId] = useState('');
+  const [userFunction, setUserFunction] = useState('');
+  const [documentCapability, setDocumentCapability] = useState('Viewer');
   const [orgId, setOrgId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState('');
@@ -202,11 +204,9 @@ export default function Users() {
 
                     <td className="py-3.5 px-4">
                       <span className="px-2.5 py-1 bg-blue-50 text-blue-800 font-bold rounded-md text-xs border border-blue-200">
-                        {u.role_name === 'RAHEE_ADMIN_REVIEWER' || u.role_name === 'IRCON_ADMIN_REVIEWER' ? 'Reviewer 1' :
-                         u.role_name === 'STEP2_REVIEWER' ? 'Reviewer 2' :
-                         u.role_name === 'MANAGER_OVERSIGHT' ? 'Manager' :
-                         u.role_name === 'FINAL_APPROVER' ? 'Final Approval' :
-                         u.role_name === 'DOCUMENT_UPLOADER' ? 'Document Uploader' :
+                        {u.role_name === 'RAHEE_ADMIN_REVIEWER' || u.role_name === 'IRCON_ADMIN_REVIEWER' ? 'Admin' :
+                         u.role_name === 'DOCUMENT_UPLOADER' ? 'Execution Control' :
+                         u.role_name === 'MANAGER_OVERSIGHT' || u.role_name === 'STEP2_REVIEWER' || u.role_name === 'FINAL_APPROVER' ? 'Manager / Viewer' :
                          u.role_name === 'SUPER_ADMIN' ? 'Super Admin' :
                          u.role_name}
                       </span>
@@ -318,35 +318,61 @@ export default function Users() {
                 </div>
               )}
 
+              {/* Dropdown 1: Function Designation */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Assigned Role (*)</label>
+                <label className="block font-bold text-slate-700 mb-1">Function (Designation) (*)</label>
                 <select
-                  value={roleId}
-                  onChange={(e) => setRoleId(e.target.value)}
+                  value={userFunction}
+                  onChange={(e) => {
+                    const func = e.target.value;
+                    setUserFunction(func);
+                    // Default capability based on function selection
+                    let cap = 'Viewer';
+                    if (func === 'Admin' || func === 'Execution Control') cap = 'Upload';
+                    setDocumentCapability(cap);
+
+                    // Auto-resolve roleId
+                    if (func === 'Admin') {
+                      setRoleId((parseInt(orgId) === 2 || orgId === '2') ? '8' : '2');
+                    } else if (func === 'Execution Control' && cap === 'Upload') {
+                      setRoleId('7');
+                    } else {
+                      setRoleId('6');
+                    }
+                  }}
                   required
                   className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="">-- Select Assigned Role --</option>
-                  {roles
-                    .filter(r => {
-                      // Filter out redundant company-specific reviewer option based on selected orgId
-                      if ((parseInt(orgId) === 1 || orgId === '1') && r.name === 'IRCON_ADMIN_REVIEWER') return false;
-                      if ((parseInt(orgId) === 2 || orgId === '2') && r.name === 'RAHEE_ADMIN_REVIEWER') return false;
-                      return true;
-                    })
-                    .map(r => {
-                      let label = r.name;
-                      if (r.name === 'RAHEE_ADMIN_REVIEWER' || r.name === 'IRCON_ADMIN_REVIEWER') label = 'Reviewer 1';
-                      else if (r.name === 'STEP2_REVIEWER') label = 'Reviewer 2';
-                      else if (r.name === 'MANAGER_OVERSIGHT') label = 'Manager';
-                      else if (r.name === 'FINAL_APPROVER') label = 'Final Approval';
-                      else if (r.name === 'DOCUMENT_UPLOADER') label = 'Document Uploader';
-                      else if (r.name === 'SUPER_ADMIN') label = 'Super Admin';
-                      else if (r.name === 'RAHEE_EXEC_ADMIN') label = 'Admin';
-                      return (
-                        <option key={r.id} value={r.id}>{label}</option>
-                      );
-                    })}
+                  <option value="">-- Select Function Designation --</option>
+                  <option value="Admin">Admin (Company Administration)</option>
+                  <option value="Execution Control">Execution Control</option>
+                  <option value="Manager">Manager</option>
+                  <option value="Document Reviewer">Document Reviewer</option>
+                  <option value="Viewer">Viewer</option>
+                </select>
+              </div>
+
+              {/* Dropdown 2: Document Upload and Viewer Rights */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Document Upload and Viewer (*)</label>
+                <select
+                  value={documentCapability}
+                  onChange={(e) => {
+                    const cap = e.target.value;
+                    setDocumentCapability(cap);
+                    if (userFunction === 'Admin') {
+                      setRoleId((parseInt(orgId) === 2 || orgId === '2') ? '8' : '2');
+                    } else if (userFunction === 'Execution Control' && cap === 'Upload') {
+                      setRoleId('7');
+                    } else {
+                      setRoleId('6');
+                    }
+                  }}
+                  required
+                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-800 focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Upload">📤 Upload (Upload, Preview & Download)</option>
+                  <option value="Viewer">👁️ Viewer (Preview & Download)</option>
                 </select>
               </div>
 

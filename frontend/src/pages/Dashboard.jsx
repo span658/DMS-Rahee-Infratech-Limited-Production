@@ -69,55 +69,25 @@ export default function Dashboard() {
       </div>
 
       {/* Metrics Cards */}
-      <div className={`grid grid-cols-1 sm:grid-cols-2 ${(hasPermission('approve_reject') || hasPermission('final_approve')) ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-4`}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
         
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">Total Documents</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Total Uploaded Documents</span>
             <FileText className="w-5 h-5 text-blue-600" />
           </div>
           <p className="text-2xl font-black text-slate-900">{metrics?.totalDocuments || 0}</p>
-          <p className="text-[11px] text-slate-400 mt-1">Managed under active tenant</p>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-amber-200 bg-amber-50/30 shadow-sm">
-          <div className="flex items-center justify-between text-amber-700 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">Pending Reviews</span>
-            <Clock className="w-5 h-5 text-amber-600" />
-          </div>
-          <p className="text-2xl font-black text-amber-900">{metrics?.pendingReviews || 0}</p>
-          <p className="text-[11px] text-amber-700 mt-1">In workflow evaluation pipeline</p>
-        </div>
-
-        <div className="bg-white p-5 rounded-2xl border border-rose-200 bg-rose-50/30 shadow-sm">
-          <div className="flex items-center justify-between text-rose-700 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">Rejected Docs</span>
-            <XCircle className="w-5 h-5 text-rose-600" />
-          </div>
-          <p className="text-2xl font-black text-rose-900">{metrics?.rejectedDocuments || 0}</p>
-          <p className="text-[11px] text-rose-700 mt-1">Awaiting uploader corrections</p>
+          <p className="text-[11px] text-slate-400 mt-1">Uploaded & stored in Bikramshila directory</p>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-emerald-200 bg-emerald-50/30 shadow-sm">
           <div className="flex items-center justify-between text-emerald-700 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider">Final Approved</span>
+            <span className="text-xs font-bold uppercase tracking-wider">Active Documents (Version V1)</span>
             <CheckCircle2 className="w-5 h-5 text-emerald-600" />
           </div>
-          <p className="text-2xl font-black text-emerald-900">{metrics?.finalApproved || 0}</p>
-          <p className="text-[11px] text-emerald-700 mt-1">Locked immutable final state</p>
+          <p className="text-2xl font-black text-emerald-900">{metrics?.finalApproved || metrics?.totalDocuments || 0}</p>
+          <p className="text-[11px] text-emerald-700 mt-1">Permanently tagged as 'General Version V1'</p>
         </div>
-
-        {(hasPermission('approve_reject') || hasPermission('final_approve')) && (
-          <div className="bg-white p-5 rounded-2xl border border-indigo-200 bg-indigo-50/30 shadow-sm">
-            <div className="flex items-center justify-between text-indigo-700 mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">My Action Items</span>
-              <AlertCircle className="w-5 h-5 text-indigo-600" />
-            </div>
-            <p className="text-2xl font-black text-indigo-900">{metrics?.myPendingActions || 0}</p>
-            <p className="text-[11px] text-indigo-700 mt-1">Requires your immediate action</p>
-          </div>
-        )}
-
       </div>
 
       {/* Analytics Charts */}

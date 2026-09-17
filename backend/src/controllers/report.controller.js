@@ -1,11 +1,12 @@
 const db = require('../config/db');
+const { MULTI_TENANT_ISOLATION_ENABLED } = require('../config/workflow.config');
 
 async function getDashboardMetrics(req, res) {
   try {
     let tenantCondition = '';
     let params = [];
 
-    if (!req.user.is_super_admin) {
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin) {
       tenantCondition = ' WHERE organization_id = ?';
       params.push(req.user.organization_id);
     } else if (req.query.organization_id) {
@@ -90,7 +91,7 @@ async function getDashboardMetrics(req, res) {
     if (hasAuditPerm) {
       let auditSql = 'SELECT * FROM audit_logs';
       let auditParams = [];
-      if (!req.user.is_super_admin) {
+      if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin) {
         auditSql += ' WHERE organization_id = ?';
         auditParams.push(req.user.organization_id);
       }

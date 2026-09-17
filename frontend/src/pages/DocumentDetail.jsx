@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import StatusBadge from '../components/StatusBadge';
@@ -20,27 +20,34 @@ import {
   XCircle, 
   Lock, 
   Clock, 
-  User 
+  User,
+  Trash2,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
 
 export default function DocumentDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user, hasPermission } = useAuth();
   const [document, setDocument] = useState(null);
   const [versions, setVersions] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Revision upload state
+  // Revision upload & Archival state
   const [revisionFile, setRevisionFile] = useState(null);
   const [revisionNotes, setRevisionNotes] = useState('');
   const [uploadingRevision, setUploadingRevision] = useState(false);
   const [revisionError, setRevisionError] = useState('');
+  const [archivingDoc, setArchivingDoc] = useState(false);
 
-  // Modals state
+  // Modals & Restoration state
   const [showPreview, setShowPreview] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [restoringDoc, setRestoringDoc] = useState(false);
+  const [workflowEnabled, setWorkflowEnabled] = useState(true);
 
   const fetchDocumentData = async () => {
     try {
@@ -50,6 +57,9 @@ export default function DocumentDetail() {
         setDocument(res.data.document);
         setVersions(res.data.versions);
         setReviews(res.data.reviews);
+        if (res.data.workflow_enabled !== undefined) {
+          setWorkflowEnabled(res.data.workflow_enabled);
+        }
       }
       setLoading(false);
     } catch (err) {
@@ -96,17 +106,19 @@ export default function DocumentDetail() {
   const getRevisionAcceptString = (type) => {
     switch (type) {
       case 'PDF':
-        return '.pdf,application/pdf';
+        return '.pdf';
       case 'WORD':
-        return '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        return '.doc,.docx';
       case 'EXCEL':
-        return '.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        return '.xls,.xlsx';
       case 'POWERPOINT':
-        return '.ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation';
+        return '.ppt,.pptx';
       case 'IMAGE':
-        return '.jpg,.jpeg,.png,.webp,.svg,image/*';
+        return '.jpg,.jpeg,.png,.webp,.svg';
+      case 'CAD':
+        return '.dwg,.dxf,.stl,.obj,.step,.stp,.iges';
       default:
-        return '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp';
+        return '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.dwg,.dxf,.stl,.obj,.step,.stp,.iges';
     }
   };
 
@@ -154,6 +166,58 @@ export default function DocumentDetail() {
     fetchDocumentData();
   };
 
+  const handleRestoreDocument = async () => {
+    try {
+      setRestoringDoc(true);
+      const res = await api.post(`/documents/${id}/restore`);
+      setRestoringDoc(false);
+      if (res.data.success) {
+        alert(res.data.message);
+        fetchDocumentData();
+      }
+    } catch (err) {
+      setRestoringDoc(false);
+      alert('Failed to restore document: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
+  const handleArchiveDocument = async () => {
+    if (!window.confirm(`Are you sure you want to move document "${document?.title}" to Archive?`)) {
+      return;
+    }
+    try {
+      setArchivingDoc(true);
+      const res = await api.post(`/documents/${id}/archive`);
+      setArchivingDoc(false);
+      if (res.data.success) {
+        alert(res.data.message);
+        fetchDocumentData();
+      }
+    } catch (err) {
+      setArchivingDoc(false);
+      alert('Failed to archive document: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
+  const handleDeleteDocument = async () => {
+    if (!user?.is_super_admin) {
+      alert('Forbidden: ONLY Super Admin is authorized to delete documents.');
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to permanently delete document "${document?.title}"? This action cannot be undone.`)) {
+      return;
+    }
+    try {
+      const res = await api.delete(`/documents/${id}`);
+      if (res.data.success) {
+        alert(`Document "${document?.title}" deleted successfully.`);
+        navigate('/documents');
+      }
+    } catch (err) {
+      alert('Failed to delete document: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -190,9 +254,12 @@ export default function DocumentDetail() {
   }
 
   const canFinalApprove = (isFinalApprover || user?.is_super_admin) && ['FINAL_APPROVAL_PENDING', 'APPROVED_BY_REVIEWER_2'].includes(document.status);
+  const canRequestRevisionOnApproved = (isReviewer1 || isReviewer2 || isFinalApprover || user?.is_super_admin) && (document.status === 'FINAL_APPROVED' || document.is_locked === 1);
 
-  const isUserAllowedToReview = canReview || canFinalApprove;
-  const isRejectedAndUploader = document.status === 'REJECTED' && !user?.is_super_admin && document.uploaded_by === user?.id;
+  const isUserAllowedToReview = canReview || canFinalApprove || canRequestRevisionOnApproved;
+  const isOriginalUploader = document.uploaded_by === user?.id;
+  const isRejectedAndUploader = document.status === 'REJECTED' && !user?.is_super_admin && isOriginalUploader;
+  const isFinalApprovedAndUploader = (document.status === 'FINAL_APPROVED' || document.is_locked === 1) && !user?.is_super_admin && isOriginalUploader;
 
   return (
     <div className="space-y-6">
@@ -232,41 +299,71 @@ export default function DocumentDetail() {
             <span>Version History ({versions.length})</span>
           </button>
 
-          {document.status === 'FINAL_APPROVED' || document.is_locked === 1 ? (
+          <button
+            onClick={() => handleDownload(document)}
+            className="flex items-center space-x-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition shadow-sm"
+          >
+            <Download className="w-4 h-4" />
+            <span>Download {document.current_version_number || 'V1'}</span>
+          </button>
+
+          {user?.is_super_admin && document.status !== 'ARCHIVED' && (
             <button
-              disabled
-              title="Download is disabled for Final Approved documents"
-              className="flex items-center space-x-1.5 px-3 py-2 bg-slate-200 text-slate-400 font-bold rounded-xl text-xs border border-slate-300 cursor-not-allowed opacity-75"
+              onClick={handleArchiveDocument}
+              disabled={archivingDoc}
+              className="flex items-center space-x-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-xl text-xs transition border border-amber-300"
+              title="Archive Document (Super Admin Only)"
             >
-              <Lock className="w-4 h-4 text-slate-400" />
-              <span>Download Locked</span>
+              <Archive className="w-4 h-4 text-amber-600" />
+              <span>{archivingDoc ? 'Archiving...' : 'Archive Document'}</span>
             </button>
-          ) : (
+          )}
+
+          {user?.is_super_admin && document.status === 'ARCHIVED' && (
             <button
-              onClick={() => handleDownload(document)}
-              className="flex items-center space-x-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition shadow-sm"
+              onClick={handleRestoreDocument}
+              disabled={restoringDoc}
+              className="flex items-center space-x-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold rounded-xl text-xs transition border border-emerald-300"
+              title="Restore Document (Super Admin Only)"
             >
-              <Download className="w-4 h-4" />
-              <span>Download {document.current_version_number || 'V1'}</span>
+              <RotateCcw className="w-4 h-4 text-emerald-600" />
+              <span>{restoringDoc ? 'Restoring...' : 'Restore Document'}</span>
+            </button>
+          )}
+
+          {user?.is_super_admin && (
+            <button
+              onClick={handleDeleteDocument}
+              className="flex items-center space-x-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-xl text-xs transition border border-rose-200"
+              title="Delete Document (Super Admin Only)"
+            >
+              <Trash2 className="w-4 h-4 text-rose-600" />
+              <span>Delete Document</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Visual Workflow Progress Stepper */}
-      <WorkflowStepper status={document.status} currentVersion={document.current_version_number} />
+      {/* Visual Workflow Progress Stepper (Only rendered if workflow is active) */}
+      {workflowEnabled && (
+        <WorkflowStepper status={document.status} currentVersion={document.current_version_number} />
+      )}
 
-      {/* Review Action Banner for Eligible Reviewers */}
-      {isUserAllowedToReview && (
+      {/* Review Action Banner for Eligible Reviewers (Only rendered if workflow is active) */}
+      {workflowEnabled && isUserAllowedToReview && (
         <div className="p-6 bg-gradient-to-r from-blue-900 to-indigo-900 rounded-2xl text-white shadow-lg flex flex-col justify-between gap-4 border border-blue-800">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <span className="px-2.5 py-1 bg-amber-400 text-slate-950 font-black text-[10px] rounded uppercase tracking-wider">
-                Action Required
+                {document.status === 'FINAL_APPROVED' ? 'Request Revisions' : 'Action Required'}
               </span>
-              <h3 className="text-lg font-extrabold mt-1">Pending Your Workflow Review</h3>
+              <h3 className="text-lg font-extrabold mt-1">
+                {document.status === 'FINAL_APPROVED' ? 'Request Changes on Approved Document' : 'Pending Your Workflow Review'}
+              </h3>
               <p className="text-xs text-blue-200 mt-0.5">
-                Review document details, preview contents, check past history, and submit your decision.
+                {document.status === 'FINAL_APPROVED' 
+                  ? 'This document is Final Approved. If further edits are required, click below to submit change requests in description box.'
+                  : 'Review document details, preview contents, check past history, and submit your decision.'}
               </p>
             </div>
 
@@ -274,7 +371,7 @@ export default function DocumentDetail() {
               onClick={() => setShowReviewModal(true)}
               className="px-6 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs shadow-md transition shrink-0"
             >
-              Submit Review Decision &rarr;
+              {document.status === 'FINAL_APPROVED' ? 'Request Changes / Revision &rarr;' : 'Submit Review Decision &rarr;'}
             </button>
           </div>
 
@@ -292,68 +389,33 @@ export default function DocumentDetail() {
         </div>
       )}
 
-      {/* Re-submission Box for Rejected Documents */}
-      {isRejectedAndUploader && (
-        <div className="p-6 bg-rose-50 border border-rose-200 rounded-2xl space-y-4 shadow-sm">
+      {/* Restoration Banner for Archived Documents */}
+      {document.status === 'ARCHIVED' && (
+        <div className="p-6 bg-amber-50 border border-amber-200 rounded-2xl space-y-3 shadow-sm">
           <div className="flex items-start space-x-3">
-            <XCircle className="w-6 h-6 text-rose-600 shrink-0 mt-0.5" />
+            <Clock className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
             <div className="space-y-1 w-full">
-              <h3 className="font-bold text-rose-900 text-sm">Changes Requested by Reviewer (Document Rejected)</h3>
-              {reviews.filter(r => r.action === 'REJECTED').slice(-1)[0] && (
-                <div className="p-3 bg-white border border-rose-300 rounded-xl text-xs text-rose-950 font-medium my-2 shadow-2xs">
-                  <span className="font-bold text-rose-800">💬 Required Changes from {reviews.filter(r => r.action === 'REJECTED').slice(-1)[0].reviewer_name}:</span>
-                  <p className="mt-1 whitespace-pre-line italic text-slate-800 bg-rose-50/50 p-2 rounded-lg border border-rose-200">
-                    "{reviews.filter(r => r.action === 'REJECTED').slice(-1)[0].comments}"
-                  </p>
-                </div>
-              )}
-              <p className="text-xs text-rose-700">
-                Please inspect the required change comments above and upload an updated document version to restart the review cycle.
+              <h3 className="font-bold text-amber-950 text-sm">Archived Document</h3>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                This document is currently archived. File binaries and records are permanently retained in storage and remain previewable, downloadable, and restorable.
               </p>
             </div>
           </div>
-
-          {revisionError && (
-            <p className="text-xs font-semibold text-rose-700 bg-rose-100 p-2.5 rounded-lg border border-rose-300">
-              {revisionError}
-            </p>
-          )}
-
-          <form onSubmit={handleRevisionUpload} className="bg-white p-4 rounded-xl border border-rose-200 space-y-4 text-xs">
-            <h4 className="font-bold text-slate-800 text-xs">Upload Revised Document Version</h4>
-
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Select Revised File (*)</label>
-              <input
-                type="file"
-                onChange={(e) => handleRevisionFileChange(e.target.files[0])}
-                required
-                className="w-full text-xs"
-                accept={getRevisionAcceptString(document.document_type)}
-              />
-            </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Revision Notes / Changes Summary</label>
-              <input
-                type="text"
-                value={revisionNotes}
-                onChange={(e) => setRevisionNotes(e.target.value)}
-                placeholder="e.g., Updated financial figures on page 4 as requested..."
-                className="w-full p-2.5 border border-slate-300 rounded-lg text-xs"
-              />
-            </div>
-
+          <div className="pt-2 flex justify-end">
             <button
-              type="submit"
-              disabled={uploadingRevision}
-              className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-sm transition"
+              onClick={handleRestoreDocument}
+              disabled={restoringDoc}
+              className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs shadow-sm transition flex items-center space-x-2"
             >
-              {uploadingRevision ? 'Resubmitting...' : 'Upload Revision & Resubmit for Review'}
+              <span>{restoringDoc ? 'Restoring Document...' : 'Restore Document & Resubmit for Review'}</span>
             </button>
-          </form>
+          </div>
         </div>
       )}
+
+
+
+
 
       {/* Main Metadata & Review Trail Details Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

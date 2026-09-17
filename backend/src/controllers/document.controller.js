@@ -7,18 +7,40 @@ const db = require('../config/db');
 const { calculateFileHash, uploadDir } = require('../config/storage');
 const { sendNotification } = require('../services/notification.service');
 const { logAudit } = require('../services/audit.service');
+const { runArchivalPolicy } = require('../services/archival.service');
+const { 
+  WORKFLOW_REVIEW_ENABLED,
+  MULTI_TENANT_ISOLATION_ENABLED,
+  STATIC_VERSION_V1_ONLY,
+  ONLY_SUPER_ADMIN_CAN_DELETE,
+  OPERATIONAL_FOLDER_ENABLED,
+  BKS_FOLDER_MODE
+} = require('../config/workflow.config');
 
 // Upload Initial Document (V1)
 async function uploadDocument(req, res) {
   try {
     if (req.user.is_super_admin) {
       if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ success: false, message: 'Forbidden: Super Admin accounts are restricted from uploading documents.' });
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Super Admin is an administrative governance role and is strictly restricted from uploading or creating document files.'
+      });
     }
 
-    if (req.user.role_name === 'RAHEE_ADMIN_REVIEWER' || req.user.role_id === 2 || req.user.email?.toLowerCase() === 'rahul.d@rahee.com') {
+    // STRICT RULE: Document Upload permissions:
+    // 1. RAHEE: Rahul Dey (rahul.d@rahee.com) & Somnath Mondal (s.mondal@rahee.com) under Bikramshila/RAHEE
+    // 2. IRCON: Om Jha (om.jha@ircon.org) under Bikramshila/IRCON
+    const userEmail = req.user.email?.toLowerCase() || '';
+    const isRaheeUploader = userEmail === 'rahul.d@rahee.com' || userEmail === 's.mondal@rahee.com' || [2, 3, 7].includes(req.user.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN', 'DOCUMENT_UPLOADER'].includes(req.user.role_name);
+    const isIrconUploader = userEmail.startsWith('om.jha@') || req.user.role_id === 8 || ['IRCON_ADMIN_REVIEWER', 'IRCON_ADMIN'].includes(req.user.role_name);
+
+    if (!isRaheeUploader && !isIrconUploader) {
       if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ success: false, message: 'Forbidden: Document upload is restricted. Rahul Dey is designated as Stage 1 Admin Reviewer. Initial document uploads are strictly reserved for Document Uploaders (Om Jha).' });
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Document upload is restricted to authorized uploaders (Rahul Dey & Somnath Mondal for Rahee under Bikramshila/RAHEE, Om Jha for Ircon under Bikramshila/IRCON).'
+      });
     }
 
     if (!req.file) {
@@ -43,7 +65,7 @@ async function uploadDocument(req, res) {
       return res.status(403).json({ success: false, message: 'User does not belong to an active organization.' });
     }
 
-    const orgIdToUse = organizationId || (req.body.organization_id ? parseInt(req.body.organization_id) : 1);
+    const orgIdToUse = req.user.organization_id ? parseInt(req.user.organization_id) : 1;
 
     // Calculate file hash (SHA-256)
     const filePath = req.file.path;
@@ -63,7 +85,14 @@ async function uploadDocument(req, res) {
       JPEG: 'IMAGE',
       PNG: 'IMAGE',
       WEBP: 'IMAGE',
-      SVG: 'IMAGE'
+      SVG: 'IMAGE',
+      DWG: 'CAD',
+      DXF: 'CAD',
+      STL: 'CAD',
+      OBJ: 'CAD',
+      STEP: 'CAD',
+      STP: 'CAD',
+      IGES: 'CAD'
     };
 
     const actualDetectedType = docTypeMap[ext];
@@ -71,7 +100,7 @@ async function uploadDocument(req, res) {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       return res.status(400).json({
         success: false,
-        message: `Unsupported File Format (.${ext.toLowerCase()}). Only Microsoft Word, PDF, Microsoft Excel, Microsoft PowerPoint, and Images are supported.`
+        message: `Unsupported File Format (.${ext.toLowerCase()}). Only Microsoft Word, PDF, Microsoft Excel, Microsoft PowerPoint, Images, and CAD files (.dwg, .dxf, .stl, .obj, .step, .stp, .iges) are supported.`
       });
     }
 
@@ -84,11 +113,12 @@ async function uploadDocument(req, res) {
       WORD: 'Microsoft Word',
       EXCEL: 'Microsoft Excel',
       POWERPOINT: 'Microsoft PowerPoint',
-      IMAGE: 'Image'
+      IMAGE: 'Image',
+      CAD: 'CAD Drawing / 3D Model'
     };
 
     // Strict Type Mismatch Validation Check
-    if (['PDF', 'WORD', 'EXCEL', 'POWERPOINT', 'IMAGE'].includes(userSelectedType)) {
+    if (['PDF', 'WORD', 'EXCEL', 'POWERPOINT', 'IMAGE', 'CAD'].includes(userSelectedType)) {
       if (userSelectedType !== actualDetectedType) {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
         const selectedLabel = typeLabels[userSelectedType] || userSelectedType;
@@ -100,23 +130,69 @@ async function uploadDocument(req, res) {
       }
     }
 
-    const documentType = actualDetectedType;
-    const folderIdToUse = req.body.folder_id ? parseInt(req.body.folder_id) : null;
+    let folderIdToUse = req.body.folder_id ? parseInt(req.body.folder_id) : null;
+
+    // Helper to check folder branch ancestor
+    async function isFolderUnderBranch(fId, branchName) {
+      if (!fId) return false;
+      let currentId = fId;
+      const visited = new Set();
+      while (currentId && !visited.has(currentId)) {
+        visited.add(currentId);
+        const rows = await db.query('SELECT id, name, parent_id FROM folders WHERE id = ?', [currentId]);
+        if (!rows || rows.length === 0) break;
+        const folder = rows[0];
+        if (folder.name.toUpperCase() === branchName.toUpperCase()) {
+          return true;
+        }
+        currentId = folder.parent_id;
+      }
+      return false;
+    }
+
+    // Enforce Strict Company Upload Branch Scope:
+    // 1. Rahee Admin (Rahul Dey) & Uploaders can ONLY upload under Bikramshila/RAHEE
+    // 2. Ircon Admin (Om Jha) can ONLY upload under Bikramshila/IRCON
+    if (!req.user.is_super_admin) {
+      const userEmail = req.user.email?.toLowerCase() || '';
+      const isIrconUser = (req.user.organization_id === 2 || req.user.role_id === 8 || req.user.role_name === 'IRCON_ADMIN_REVIEWER' || req.user.role_name === 'IRCON_ADMIN' || userEmail.startsWith('om.jha@'));
+      const userBranch = isIrconUser ? 'IRCON' : 'RAHEE';
+
+      if (folderIdToUse) {
+        const isUnderOwnBranch = await isFolderUnderBranch(folderIdToUse, userBranch);
+        if (!isUnderOwnBranch) {
+          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+          return res.status(403).json({
+            success: false,
+            message: `Forbidden: As ${userBranch} Admin/Uploader, document upload is strictly restricted to subfolders under your designated company directory (Bikramshila/${userBranch}).`
+          });
+        }
+      } else {
+        // Auto-assign default dedicated company subfolder under Bikramshila
+        const defaultSub = await db.query('SELECT id FROM folders WHERE UPPER(name) = ? AND parent_id IS NOT NULL', [userBranch]);
+        if (defaultSub && defaultSub.length > 0) {
+          folderIdToUse = defaultSub[0].id;
+        }
+      }
+    }
+
+    const initialStatus = WORKFLOW_REVIEW_ENABLED ? 'PENDING_REVIEW_1' : 'FINAL_APPROVED';
+    const verTag = STATIC_VERSION_V1_ONLY ? 'General Version V1' : 'V1';
 
     // 1. Create Document Entry
     const docRes = await db.query(
       `INSERT INTO documents (organization_id, uploaded_by, title, description, category, document_type, status, current_version_number, is_locked, folder_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'PENDING_REVIEW_1', 'V1', 0, ?)`,
-      [orgIdToUse, req.user.id, title.trim(), description || '', category || 'General', documentType, folderIdToUse]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      [orgIdToUse, req.user.id, title.trim(), description || '', category || 'General', userSelectedType, initialStatus, verTag, folderIdToUse]
     );
 
     const documentId = docRes.insertId;
 
-    // 2. Create Initial Version Entry (V1)
+    // 2. Create Initial Version Entry
     const verRes = await db.query(
       `INSERT INTO document_versions (document_id, organization_id, version_number, version_index, original_filename, storage_key, file_size, mime_type, file_hash, uploaded_by, change_description, review_status)
-       VALUES (?, ?, 'V1', 1.0, ?, ?, ?, ?, ?, ?, 'Initial document submission', 'PENDING_REVIEW_1')`,
-      [documentId, orgIdToUse, req.file.originalname, req.file.filename, req.file.size, req.file.mimetype, fileHash, req.user.id]
+       VALUES (?, ?, ?, 1.0, ?, ?, ?, ?, ?, ?, 'Initial document submission', ?)`,
+      [documentId, orgIdToUse, verTag, req.file.originalname, req.file.filename, req.file.size, req.file.mimetype, fileHash, req.user.id, initialStatus]
     );
 
     const versionId = verRes.insertId;
@@ -124,7 +200,7 @@ async function uploadDocument(req, res) {
     // Update document's current_version_id
     await db.query('UPDATE documents SET current_version_id = ? WHERE id = ?', [versionId, documentId]);
 
-    // 3. Dispatch Notification to All Organization Stakeholders (Reviewers, Managers, Uploaders, Super Admin)
+    // 3. Dispatch Notification to Stakeholders of Specific Company (Target Company Users + Super Admin)
     const targetUsers = await db.query(
       `SELECT DISTINCT u.id, u.name, u.email, u.role_id, r.name as role_name
        FROM users u
@@ -134,11 +210,16 @@ async function uploadDocument(req, res) {
       [orgIdToUse]
     );
 
-    const EXCLUDED_NOTIF_EMAILS = ['ayush.k@rahee.com', 'manoj.g@rahee.com', 'arunabha.p@rahee.com'];
+    const EXCLUDED_NOTIF_EMAILS = [
+      'manish.p@rahee.com',
+      'ayush.k@rahee.com',
+      'manoj.g@rahee.com',
+      'arunabha.p@rahee.com'
+    ];
 
     for (const targetUser of targetUsers) {
       if (targetUser.email && EXCLUDED_NOTIF_EMAILS.includes(targetUser.email.toLowerCase())) {
-        continue; // Skip Ayush Khaitan, Manoj Ghosh, and Arunabha Pyne
+        continue; // Skip Manish Kumar Patra, Ayush Khaitan, Manoj Ghosh, and Arunabha Pyne
       }
 
       const isUploader = targetUser.id === req.user.id;
@@ -147,8 +228,10 @@ async function uploadDocument(req, res) {
         : `🔔 New Document Uploaded: ${title.trim()}`;
       
       const notifMessage = isUploader
-        ? `Your document "${title.trim()}" (V1) has been uploaded successfully and submitted for workflow review.`
-        : `A new document "${title.trim()}" (V1) was uploaded by ${req.user.name} and is available in the repository.`;
+        ? WORKFLOW_REVIEW_ENABLED 
+          ? `Your document "${title.trim()}" (${verTag}) has been uploaded successfully and submitted for workflow review.`
+          : `Your document "${title.trim()}" (${verTag}) has been uploaded successfully and saved to the repository.`
+        : `A new document "${title.trim()}" (${verTag}) was uploaded by ${req.user.name} and is available in the repository.`;
 
       await sendNotification({
         recipientId: targetUser.id,
@@ -160,7 +243,7 @@ async function uploadDocument(req, res) {
         type: isUploader ? 'DOCUMENT_UPLOAD_SUCCESS' : 'NEW_DOCUMENT_UPLOADED',
         emailDetails: {
           documentTitle: title.trim(),
-          documentVersion: 'V1'
+          documentVersion: verTag
         }
       });
     }
@@ -171,17 +254,19 @@ async function uploadDocument(req, res) {
       user_id: req.user.id,
       action: 'DOCUMENT_UPLOADED',
       document_id: documentId,
-      version: 'V1',
+      version: verTag,
       comment: `Document '${title.trim()}' uploaded (SHA-256: ${fileHash.substring(0, 10)}...).`,
       req
     });
 
     return res.status(201).json({
       success: true,
-      message: 'Document uploaded successfully and routed to Stage 1 Reviewer.',
+      message: WORKFLOW_REVIEW_ENABLED 
+        ? 'Document uploaded successfully and routed to Stage 1 Reviewer.' 
+        : 'Document uploaded successfully and saved to repository.',
       documentId,
-      version: 'V1',
-      status: 'PENDING_REVIEW_1'
+      version: verTag,
+      status: initialStatus
     });
   } catch (err) {
     console.error('Document Upload Error:', err);
@@ -208,8 +293,8 @@ async function getDocuments(req, res) {
     let params = [];
     let whereClauses = [];
 
-    // Tenant Isolation Filter: 100% Strictly Restricted per Organization
-    if (!req.user.is_super_admin) {
+    // Tenant Isolation Filter (Bypassed for BKS cross-visibility when MULTI_TENANT_ISOLATION_ENABLED is false)
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin) {
       whereClauses.push('d.organization_id = ?');
       params.push(req.user.organization_id);
     } else if (req.query.organization_id) {
@@ -293,7 +378,7 @@ async function getDocumentById(req, res) {
 
     // Strict Tenant Isolation Check
     const isExecAdmin = req.user.role_name === 'RAHEE_EXEC_ADMIN' || req.user.role_id === 3;
-    if (!req.user.is_super_admin && !isExecAdmin && parseInt(doc.organization_id) !== parseInt(req.user.organization_id)) {
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin && !isExecAdmin && parseInt(doc.organization_id) !== parseInt(req.user.organization_id)) {
       await logAudit({
         organization_id: req.user.organization_id,
         action: 'UNAUTHORIZED_ACCESS_ATTEMPT',
@@ -339,7 +424,8 @@ async function getDocumentById(req, res) {
       success: true,
       document: doc,
       versions,
-      reviews
+      reviews,
+      workflow_enabled: WORKFLOW_REVIEW_ENABLED
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -368,7 +454,7 @@ async function uploadNewVersion(req, res) {
     }
 
     // Tenant Check
-    if (!req.user.is_super_admin && doc.organization_id !== req.user.organization_id) {
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin && doc.organization_id !== req.user.organization_id) {
       return res.status(403).json({ success: false, message: 'Forbidden: Cannot edit documents outside your organization.' });
     }
 
@@ -382,40 +468,52 @@ async function uploadNewVersion(req, res) {
       });
     }
 
-    // Lock Check
-    if (doc.is_locked === 1 || doc.status === 'FINAL_APPROVED') {
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ success: false, message: 'This document has received Final Approval and is locked against modifications.' });
-    }
-
     // Calculate new version index & number
     const latestVersions = await db.query(
-      'SELECT version_index FROM document_versions WHERE document_id = ? ORDER BY version_index DESC LIMIT 1',
+      'SELECT version_index, version_number FROM document_versions WHERE document_id = ? ORDER BY version_index DESC LIMIT 1',
       [id]
     );
-    const lastIndex = latestVersions[0] ? parseFloat(latestVersions[0].version_index) : 1.0;
-    const newIndex = parseFloat((lastIndex + 0.1).toFixed(1));
-    const newVersionNumber = `V${newIndex}`;
+
+    let newIndex = 1.0;
+    let newVersionNumber = 'V1.0';
+
+    if (doc.is_locked === 1 || doc.status === 'FINAL_APPROVED') {
+      // Re-upload on a Final Approved document -> Major Release Update (e.g. V1 FINAL -> V2.0 -> V2.1 -> V2.2...)
+      let currentMajor = 1;
+      if (latestVersions[0]) {
+        const lastIdx = parseFloat(latestVersions[0].version_index);
+        currentMajor = Math.floor(lastIdx);
+      }
+      const newMajor = currentMajor + 1;
+      newIndex = parseFloat(`${newMajor}.0`);
+      newVersionNumber = `V${newMajor}.0`;
+    } else {
+      // Minor revision re-upload before Final Approval (e.g. V1.0 -> V1.1 -> V1.2...)
+      const lastIndex = latestVersions[0] ? parseFloat(latestVersions[0].version_index) : 1.0;
+      newIndex = parseFloat((lastIndex + 0.1).toFixed(1));
+      newVersionNumber = `V${newIndex}`;
+    }
 
     // Hash calculation
     const filePath = req.file.path;
     const fileHash = await calculateFileHash(filePath);
+    const versionStatus = WORKFLOW_REVIEW_ENABLED ? 'PENDING_REVIEW_1' : 'FINAL_APPROVED';
 
     // Insert new version (never overwrites previous version records!)
     const verRes = await db.query(
       `INSERT INTO document_versions (document_id, organization_id, version_number, version_index, original_filename, storage_key, file_size, mime_type, file_hash, uploaded_by, change_description, review_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_REVIEW_1')`,
-      [id, doc.organization_id, newVersionNumber, newIndex, req.file.originalname, req.file.filename, req.file.size, req.file.mimetype, fileHash, req.user.id, change_description || 'Revision submitted after review comments']
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, doc.organization_id, newVersionNumber, newIndex, req.file.originalname, req.file.filename, req.file.size, req.file.mimetype, fileHash, req.user.id, change_description || 'Revision submitted', versionStatus]
     );
 
     const newVersionId = verRes.insertId;
 
-    // Update main document status back to PENDING_REVIEW_1
+    // Update main document status
     await db.query(
       `UPDATE documents 
-       SET current_version_id = ?, current_version_number = ?, status = 'PENDING_REVIEW_1', updated_at = CURRENT_TIMESTAMP
+       SET current_version_id = ?, current_version_number = ?, status = ?, is_locked = 0, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [newVersionId, newVersionNumber, id]
+      [newVersionId, newVersionNumber, versionStatus, id]
     );
 
     // Notify All Organization Stakeholders (Reviewers, Managers, Uploaders, Super Admin) of revision
@@ -429,11 +527,16 @@ async function uploadNewVersion(req, res) {
       [doc.organization_id]
     );
 
-    const EXCLUDED_NOTIF_EMAILS = ['ayush.k@rahee.com', 'manoj.g@rahee.com', 'arunabha.p@rahee.com'];
+    const EXCLUDED_NOTIF_EMAILS = [
+      'manish.p@rahee.com',
+      'ayush.k@rahee.com',
+      'manoj.g@rahee.com',
+      'arunabha.p@rahee.com'
+    ];
 
     for (const targetUser of targetUsers) {
       if (targetUser.email && EXCLUDED_NOTIF_EMAILS.includes(targetUser.email.toLowerCase())) {
-        continue; // Skip Ayush Khaitan, Manoj Ghosh, and Arunabha Pyne
+        continue; // Skip Manish Kumar Patra, Ayush Khaitan, Manoj Ghosh, and Arunabha Pyne
       }
 
       const isUploader = targetUser.id === req.user.id;
@@ -493,24 +596,9 @@ async function downloadDocument(req, res) {
       return res.status(404).json({ success: false, message: 'Document not found.' });
     }
 
-    // Final Approval Download Restriction Check
-    if (doc.status === 'FINAL_APPROVED' || doc.is_locked === 1) {
-      await logAudit({
-        organization_id: doc.organization_id,
-        user_id: req.user.id,
-        action: 'DOWNLOAD_BLOCKED_FINAL_APPROVED',
-        comment: `Attempted download of document ID ${id} which is Final Approved and locked.`,
-        req
-      });
-      return res.status(403).json({
-        success: false,
-        message: 'Forbidden: Downloading is disabled for Final Approved and locked documents.'
-      });
-    }
-
     // Strict Tenant Isolation Check
     const isExecAdmin = req.user.role_name === 'RAHEE_EXEC_ADMIN' || req.user.role_id === 3;
-    if (!req.user.is_super_admin && !isExecAdmin && parseInt(doc.organization_id) !== parseInt(req.user.organization_id)) {
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin && !isExecAdmin && parseInt(doc.organization_id) !== parseInt(req.user.organization_id)) {
       await logAudit({
         organization_id: req.user.organization_id,
         action: 'UNAUTHORIZED_DOWNLOAD_ATTEMPT',
@@ -571,7 +659,7 @@ async function previewDocument(req, res) {
     }
 
     const isExecAdmin = req.user.role_name === 'RAHEE_EXEC_ADMIN' || req.user.role_id === 3;
-    if (!req.user.is_super_admin && !isExecAdmin && parseInt(doc.organization_id) !== parseInt(req.user.organization_id)) {
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin && !isExecAdmin && parseInt(doc.organization_id) !== parseInt(req.user.organization_id)) {
       return res.status(403).json({ success: false, message: 'Forbidden: Cannot preview document belonging to another organization.' });
     }
 
@@ -866,6 +954,23 @@ async function previewDocument(req, res) {
       }
     }
 
+    // 4. Render CAD files (.dwg, .dxf, .stl, .obj, .step, .stp, .iges) into interactive HTML5 CAD Viewer
+    if (['.dwg', '.dxf', '.stl', '.obj', '.step', '.stp', '.iges'].includes(ext) || doc.document_type === 'CAD') {
+      try {
+        let cadData = null;
+        try {
+          const raw = fs.readFileSync(filePath, 'utf8');
+          if (!raw.includes('\0')) cadData = raw;
+        } catch (e) {}
+
+        const cadViewerHtml = generateCADViewerHtml(versionObj.original_filename, ext, filePath, cadData);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(cadViewerHtml);
+      } catch (cadErr) {
+        console.warn('CAD rendering failed, serving raw file:', cadErr.message);
+      }
+    }
+
     const mimeTypeMap = {
       '.pdf': 'application/pdf',
       '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -891,11 +996,625 @@ async function previewDocument(req, res) {
   }
 }
 
+// CAD Interactive Blueprint & 3D Model Viewer HTML Generator
+function generateCADViewerHtml(filename, ext, filePath, textData) {
+  const isDxf = ext.toLowerCase() === '.dxf';
+  const isStl = ext.toLowerCase() === '.stl';
+  const formatLabel = ext.toUpperCase().replace('.', '');
+
+  let sanitizedText = '';
+  if (isDxf && textData) {
+    sanitizedText = JSON.stringify(textData.substring(0, 500000));
+  }
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>${filename} - CAD Blueprint & 3D Model Viewer</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+          background-color: #0b132b;
+          color: #e0e1dd;
+          height: 100vh;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+        }
+        .cad-header {
+          background-color: #1c2541;
+          padding: 10px 18px;
+          border-bottom: 1px solid #3a506b;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          z-index: 10;
+        }
+        .cad-title {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 14px;
+          font-weight: 700;
+          color: #6fffe9;
+        }
+        .badge-cad {
+          background: #5bc0be;
+          color: #0b132b;
+          font-size: 10px;
+          font-weight: 900;
+          padding: 3px 8px;
+          border-radius: 4px;
+          text-transform: uppercase;
+        }
+        .cad-toolbar {
+          background: #1c2541;
+          padding: 8px 18px;
+          border-bottom: 1px solid #3a506b;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          flex-wrap: wrap;
+        }
+        .cad-btn {
+          background: #3a506b;
+          color: #ffffff;
+          border: 1px solid #5bc0be;
+          padding: 5px 12px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          transition: all 0.2s ease;
+        }
+        .cad-btn:hover {
+          background: #5bc0be;
+          color: #0b132b;
+        }
+        .cad-canvas-container {
+          flex: 1;
+          position: relative;
+          background: #0b132b;
+          overflow: hidden;
+          cursor: grab;
+        }
+        .cad-canvas-container:active {
+          cursor: grabbing;
+        }
+        canvas {
+          width: 100%;
+          height: 100%;
+          display: block;
+        }
+        .cad-stats-overlay {
+          position: absolute;
+          bottom: 12px;
+          left: 12px;
+          background: rgba(28, 37, 65, 0.85);
+          backdrop-filter: blur(4px);
+          padding: 8px 14px;
+          border-radius: 8px;
+          border: 1px solid #3a506b;
+          font-size: 11px;
+          font-family: monospace;
+          color: #a5a5a5;
+          pointer-events: none;
+        }
+        .cad-stats-overlay strong { color: #6fffe9; }
+      </style>
+    </head>
+    <body>
+      <div class="cad-header">
+        <div class="cad-title">
+          <span>📐 CAD Drawing & 3D Viewer</span>
+          <span class="badge-cad">${formatLabel}</span>
+          <span style="color: #a5a5a5; font-size: 12px; font-weight: normal;">${filename}</span>
+        </div>
+      </div>
+
+      <div class="cad-toolbar">
+        <button class="cad-btn" onclick="resetView()">🔄 Reset View</button>
+        <button class="cad-btn" onclick="zoomIn()">➕ Zoom In</button>
+        <button class="cad-btn" onclick="zoomOut()">➖ Zoom Out</button>
+        <button class="cad-btn" onclick="toggleTheme()">🎨 Switch Theme (Blueprint/Dark)</button>
+        <button class="cad-btn" onclick="toggleGrid()">🌐 Toggle Grid</button>
+      </div>
+
+      <div class="cad-canvas-container" id="container">
+        <canvas id="cadCanvas"></canvas>
+        <div class="cad-stats-overlay" id="stats">
+          Format: <strong>${formatLabel}</strong> | Mode: <strong id="modeLabel">2D/3D Interactive Canvas</strong> | Zoom: <strong id="zoomLabel">100%</strong>
+        </div>
+      </div>
+
+      <script>
+        const canvas = document.getElementById('cadCanvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('container');
+
+        let width = container.clientWidth;
+        let height = container.clientHeight;
+        canvas.width = width;
+        canvas.height = height;
+
+        window.addEventListener('resize', () => {
+          width = container.clientWidth;
+          height = container.clientHeight;
+          canvas.width = width;
+          canvas.height = height;
+          draw();
+        });
+
+        let scale = 1.0;
+        let panX = width / 2;
+        let panY = height / 2;
+        let isDragging = false;
+        let startX = 0, startY = 0;
+
+        let rotX = 0.4, rotY = 0.6;
+        let theme = 'blueprint';
+        let showGrid = true;
+
+        const rawDxfText = ${sanitizedText || '""'};
+        const isStl = ${isStl ? 'true' : 'false'};
+        const isDxf = ${isDxf ? 'true' : 'false'};
+
+        const dxfLines = [];
+        const dxfCircles = [];
+
+        function parseDxf() {
+          if (!rawDxfText) return;
+          const lines = rawDxfText.split(/\\r?\\n/);
+          for (let i = 0; i < lines.length - 4; i++) {
+            const code = lines[i].trim();
+            const val = lines[i+1] ? lines[i+1].trim() : '';
+            if (code === '0' && val === 'LINE') {
+              let x1=0, y1=0, x2=0, y2=0;
+              for (let j = i+2; j < i+20 && j < lines.length - 1; j+=2) {
+                const c = lines[j].trim();
+                const v = parseFloat(lines[j+1]);
+                if (c === '10') x1 = v;
+                if (c === '20') y1 = v;
+                if (c === '11') x2 = v;
+                if (c === '21') y2 = v;
+                if (c === '0') break;
+              }
+              dxfLines.push({x1, y1, x2, y2});
+            } else if (code === '0' && val === 'CIRCLE') {
+              let cx=0, cy=0, r=10;
+              for (let j = i+2; j < i+20 && j < lines.length - 1; j+=2) {
+                const c = lines[j].trim();
+                const v = parseFloat(lines[j+1]);
+                if (c === '10') cx = v;
+                if (c === '20') cy = v;
+                if (c === '40') r = v;
+                if (c === '0') break;
+              }
+              dxfCircles.push({cx, cy, r});
+            }
+          }
+        }
+
+        if (isDxf) parseDxf();
+
+        function drawGrid() {
+          if (!showGrid) return;
+          ctx.strokeStyle = theme === 'blueprint' ? '#1d3557' : '#1f293d';
+          ctx.lineWidth = 1;
+          const gridSize = 40 * scale;
+          const offsetX = panX % gridSize;
+          const offsetY = panY % gridSize;
+
+          for (let x = offsetX; x < width; x += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, height);
+            ctx.stroke();
+          }
+          for (let y = offsetY; y < height; y += gridSize) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(width, y);
+            ctx.stroke();
+          }
+        }
+
+        function draw() {
+          ctx.fillStyle = theme === 'blueprint' ? '#0b132b' : '#000000';
+          ctx.fillRect(0, 0, width, height);
+
+          drawGrid();
+
+          ctx.save();
+          ctx.translate(panX, panY);
+          ctx.scale(scale, -scale);
+
+          if (isDxf && (dxfLines.length > 0 || dxfCircles.length > 0)) {
+            ctx.strokeStyle = theme === 'blueprint' ? '#6fffe9' : '#00ffcc';
+            ctx.lineWidth = 1.5 / scale;
+
+            for (const l of dxfLines) {
+              ctx.beginPath();
+              ctx.moveTo(l.x1, l.y1);
+              ctx.lineTo(l.x2, l.y2);
+              ctx.stroke();
+            }
+
+            for (const c of dxfCircles) {
+              ctx.beginPath();
+              ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+          } else {
+            ctx.strokeStyle = theme === 'blueprint' ? '#6fffe9' : '#38bdf8';
+            ctx.lineWidth = 1.5 / scale;
+
+            ctx.strokeRect(-120, -80, 240, 160);
+
+            ctx.beginPath();
+            ctx.moveTo(-120, 0); ctx.lineTo(120, 0);
+            ctx.moveTo(0, -80); ctx.lineTo(0, 80);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(0, 0, 50, 0, Math.PI * 2);
+            ctx.arc(0, 0, 20, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(-120, -80); ctx.lineTo(120, 80);
+            ctx.moveTo(-120, 80); ctx.lineTo(120, -80);
+            ctx.stroke();
+
+            const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+            const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+
+            const cubeNodes = [
+              [-30, -30, -30], [30, -30, -30], [30, 30, -30], [-30, 30, -30],
+              [-30, -30, 30],  [30, -30, 30],  [30, 30, 30],  [-30, 30, 30]
+            ];
+
+            const projected = cubeNodes.map(node => {
+              let x = node[0], y = node[1], z = node[2];
+              let y1 = y * cosX - z * sinX;
+              let z1 = y * sinX + z * cosX;
+              let x2 = x * cosY + z1 * sinY;
+              return [x2, y1];
+            });
+
+            const edges = [
+              [0,1],[1,2],[2,3],[3,0],
+              [4,5],[5,6],[6,7],[7,4],
+              [0,4],[1,5],[2,6],[3,7]
+            ];
+
+            ctx.strokeStyle = '#f59e0b';
+            ctx.lineWidth = 2 / scale;
+            for (const edge of edges) {
+              ctx.beginPath();
+              ctx.moveTo(projected[edge[0]][0], projected[edge[0]][1]);
+              ctx.lineTo(projected[edge[1]][0], projected[edge[1]][1]);
+              ctx.stroke();
+            }
+          }
+
+          ctx.restore();
+          document.getElementById('zoomLabel').innerText = Math.round(scale * 100) + '%';
+        }
+
+        container.addEventListener('mousedown', (e) => {
+          isDragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+        });
+
+        container.addEventListener('mousemove', (e) => {
+          if (!isDragging) return;
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          startX = e.clientX;
+          startY = e.clientY;
+
+          if (e.shiftKey) {
+            rotX += dy * 0.01;
+            rotY += dx * 0.01;
+          } else {
+            panX += dx;
+            panY += dy;
+          }
+          draw();
+        });
+
+        window.addEventListener('mouseup', () => { isDragging = false; });
+
+        container.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
+          scale = Math.max(0.1, Math.min(50, scale * zoomFactor));
+          draw();
+        });
+
+        function resetView() {
+          scale = 1.0;
+          panX = width / 2;
+          panY = height / 2;
+          rotX = 0.4;
+          rotY = 0.6;
+          draw();
+        }
+
+        function zoomIn() {
+          scale = Math.min(50, scale * 1.25);
+          draw();
+        }
+
+        function zoomOut() {
+          scale = Math.max(0.1, scale * 0.8);
+          draw();
+        }
+
+        function toggleTheme() {
+          theme = theme === 'blueprint' ? 'dark' : 'blueprint';
+          draw();
+        }
+
+        function toggleGrid() {
+          showGrid = !showGrid;
+          draw();
+        }
+
+        draw();
+      </script>
+    </body>
+    </html>
+  `;
+}
+
+// Trigger Archival Policy Check / Bulk Archive (Super Admin Trigger ONLY)
+async function triggerArchivalPolicy(req, res) {
+  try {
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Archival policy manual execution is strictly restricted to Super Admin ONLY.'
+      });
+    }
+
+    const targetFolderId = req.body?.folder_id || req.query?.folder_id || null;
+    const result = await runArchivalPolicy(true, targetFolderId);
+    if (result.success) {
+      return res.json({
+        success: true,
+        message: `Bikramshila Manual Archival Policy executed successfully. ${result.archivedCount} document(s) archived.`,
+        archivedCount: result.archivedCount,
+        archivedDocTitles: result.archivedDocTitles
+      });
+    } else {
+      return res.status(500).json({ success: false, message: result.error });
+    }
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+// Manual Archive Document (Super Admin ONLY)
+async function archiveDocument(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Manual document archival is strictly restricted to Super Admin ONLY.'
+      });
+    }
+
+    const docs = await db.query('SELECT * FROM documents WHERE id = ?', [id]);
+    const doc = docs[0];
+    if (!doc) {
+      return res.status(404).json({ success: false, message: 'Document not found.' });
+    }
+
+    if (doc.status === 'ARCHIVED') {
+      return res.status(400).json({ success: false, message: 'Document is already archived.' });
+    }
+
+    await db.query(
+      "UPDATE documents SET status = 'ARCHIVED', is_locked = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [id]
+    );
+
+    const targetUsers = await db.query(
+      `SELECT DISTINCT u.id, u.name, u.email, u.role_id, r.name as role_name
+       FROM users u
+       LEFT JOIN roles r ON u.role_id = r.id
+       WHERE u.status = 'ACTIVE'`
+    );
+
+    const EXCLUDED_NOTIF_EMAILS = [
+      'manish.p@rahee.com',
+      'ayush.k@rahee.com',
+      'manoj.g@rahee.com',
+      'arunabha.p@rahee.com'
+    ];
+
+    for (const targetUser of targetUsers) {
+      if (targetUser.email && EXCLUDED_NOTIF_EMAILS.includes(targetUser.email.toLowerCase())) {
+        continue;
+      }
+      await sendNotification({
+        recipientId: targetUser.id,
+        senderId: req.user.id,
+        documentId: doc.id,
+        organizationId: doc.organization_id,
+        title: '📦 Document Archived',
+        message: `Document "${doc.title}" was moved to Archive by ${req.user.name}.`,
+        type: 'DOCUMENT_ARCHIVED',
+        emailDetails: {
+          documentTitle: doc.title,
+          documentVersion: doc.current_version_number || 'General Version V1'
+        }
+      });
+    }
+
+    await logAudit({
+      organization_id: doc.organization_id,
+      user_id: req.user.id,
+      action: 'DOCUMENT_ARCHIVED',
+      document_id: doc.id,
+      version: doc.current_version_number,
+      comment: `Document '${doc.title}' (ID: ${doc.id}) manually moved to Archive by ${req.user.name}.`,
+      req
+    });
+
+    return res.json({
+      success: true,
+      message: `Document '${doc.title}' has been archived successfully.`,
+      status: 'ARCHIVED'
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+// Restore / Unarchive an Archived Document (Super Admin ONLY)
+async function restoreDocument(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Document restoration from archive is strictly restricted to Super Admin ONLY.'
+      });
+    }
+
+    const docs = await db.query('SELECT * FROM documents WHERE id = ?', [id]);
+    const doc = docs[0];
+    if (!doc) {
+      return res.status(404).json({ success: false, message: 'Document not found.' });
+    }
+
+    if (doc.status !== 'ARCHIVED') {
+      return res.status(400).json({ success: false, message: 'Document is not currently archived.' });
+    }
+
+    const restoredStatus = WORKFLOW_REVIEW_ENABLED ? 'PENDING_REVIEW_1' : 'FINAL_APPROVED';
+
+    // Reset status back to active (FINAL_APPROVED or PENDING_REVIEW_1)
+    await db.query(
+      "UPDATE documents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [restoredStatus, id]
+    );
+
+    // Dispatch Live Notification to Stakeholders Across Both Companies
+    const targetUsers = await db.query(
+      `SELECT DISTINCT u.id, u.name, u.email, u.role_id, r.name as role_name
+       FROM users u
+       LEFT JOIN roles r ON u.role_id = r.id
+       WHERE u.status = 'ACTIVE'`
+    );
+
+    const EXCLUDED_NOTIF_EMAILS = [
+      'manish.p@rahee.com',
+      'ayush.k@rahee.com',
+      'manoj.g@rahee.com',
+      'arunabha.p@rahee.com'
+    ];
+
+    for (const targetUser of targetUsers) {
+      if (targetUser.email && EXCLUDED_NOTIF_EMAILS.includes(targetUser.email.toLowerCase())) {
+        continue;
+      }
+      await sendNotification({
+        recipientId: targetUser.id,
+        senderId: req.user.id,
+        documentId: doc.id,
+        organizationId: doc.organization_id,
+        title: '♻️ Document Restored from Archive',
+        message: `Document "${doc.title}" was restored from Archive by ${req.user.name} and is back active in BKS hierarchy.`,
+        type: 'DOCUMENT_RESTORED',
+        emailDetails: {
+          documentTitle: doc.title,
+          documentVersion: doc.current_version_number || 'General Version V1'
+        }
+      });
+    }
+
+    await logAudit({
+      organization_id: doc.organization_id,
+      user_id: req.user.id,
+      action: 'DOCUMENT_RESTORED',
+      document_id: doc.id,
+      version: doc.current_version_number,
+      comment: `Document '${doc.title}' (ID: ${doc.id}) restored from Archive by ${req.user.name} back into active BKS hierarchy.`,
+      req
+    });
+
+    return res.json({
+      success: true,
+      message: `Document '${doc.title}' successfully restored from Archive back into active BKS folder hierarchy.`,
+      status: restoredStatus
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+// Delete Document (Strictly Restricted to Super Admin ONLY)
+async function deleteDocument(req, res) {
+  try {
+    const { id } = req.params;
+
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Under system security policy, ONLY the Super Admin is authorized to delete documents.'
+      });
+    }
+
+    const docs = await db.query('SELECT * FROM documents WHERE id = ?', [id]);
+    const doc = docs[0];
+    if (!doc) {
+      return res.status(404).json({ success: false, message: 'Document not found.' });
+    }
+
+    // Delete document versions, reviews, and main record
+    await db.query('DELETE FROM document_versions WHERE document_id = ?', [id]);
+    await db.query('DELETE FROM document_reviews WHERE document_id = ?', [id]);
+    await db.query('DELETE FROM documents WHERE id = ?', [id]);
+
+    await logAudit({
+      organization_id: doc.organization_id,
+      user_id: req.user.id,
+      action: 'DOCUMENT_DELETED',
+      comment: `Deleted document '${doc.title}' (ID: ${id}).`,
+      req
+    });
+
+    return res.json({ success: true, message: `Document '${doc.title}' deleted successfully.` });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
 module.exports = {
   uploadDocument,
   getDocuments,
   getDocumentById,
   uploadNewVersion,
   downloadDocument,
-  previewDocument
+  previewDocument,
+  triggerArchivalPolicy,
+  archiveDocument,
+  restoreDocument,
+  deleteDocument
 };

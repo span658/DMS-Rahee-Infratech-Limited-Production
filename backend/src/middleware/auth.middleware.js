@@ -49,7 +49,7 @@ async function authenticateToken(req, res, next) {
       email: user.email,
       role_id: user.role_id,
       role_name: user.role_name,
-      is_super_admin: user.role_name === 'SUPER_ADMIN' || user.organization_id === null,
+      is_super_admin: user.role_id === 1 || user.role_name === 'SUPER_ADMIN',
       permissions: permissions.map(p => p.code)
     };
 

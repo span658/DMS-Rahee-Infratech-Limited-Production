@@ -21,8 +21,19 @@ const ALLOWED_MIME_TYPES = {
   'image/jpg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
-  'image/svg+xml': '.svg'
+  'image/svg+xml': '.svg',
+  'image/vnd.dxf': '.dxf',
+  'application/dxf': '.dxf',
+  'application/dwg': '.dwg',
+  'image/vnd.dwg': '.dwg',
+  'model/stl': '.stl',
+  'application/sla': '.stl',
+  'model/obj': '.obj',
+  'application/step': '.step',
+  'application/iges': '.iges'
 };
+
+const CAD_EXTENSIONS = ['.dwg', '.dxf', '.stl', '.obj', '.step', '.stp', '.iges'];
 
 const DANGEROUS_EXTENSIONS = ['.exe', '.bat', '.cmd', '.sh', '.js', '.msi', '.vbs', '.com', '.scr', '.pif', '.dll', '.jar'];
 
@@ -48,11 +59,12 @@ const fileFilter = (req, file, cb) => {
   // 2. Format validation
   const isValidMime = ALLOWED_MIME_TYPES[file.mimetype];
   const isAllowedExt = Object.values(ALLOWED_MIME_TYPES).includes(ext);
+  const isCadExt = CAD_EXTENSIONS.includes(ext);
 
-  if (isValidMime || isAllowedExt) {
+  if (isValidMime || isAllowedExt || isCadExt) {
     cb(null, true);
   } else {
-    cb(new Error(`Invalid document format (${ext}). Supported formats: PDF, Word, Excel, PowerPoint, and Images.`), false);
+    cb(new Error(`Invalid document format (${ext}). Supported formats: PDF, Word, Excel, PowerPoint, Images, and CAD files (.dwg, .dxf, .stl, .obj, .step, .stp, .iges).`), false);
   }
 };
 

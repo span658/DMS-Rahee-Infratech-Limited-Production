@@ -1,13 +1,13 @@
 -- ============================================================================
--- Company Document Management System (DMS) - Production Database Schema & Seed
+-- Enterprise Document Management System (EDMS) - Master Database Schema & Seed
 -- Target Engine: MySQL 5.7+ / 8.0+ / SQLite 3.x
 -- Scope: Rahee Infratech Limited (Company 1) & Ircon International Limited (Company 2)
+-- Policy: Bikramshila Directory Hierarchy & Bikramshila Manual Document Archival Policy
 -- ============================================================================
 
 SET FOREIGN_KEY_CHECKS = 0;
 
--- Clean Reset: Drop Existing Database & Tables for Re-execution in MySQL Workbench
-
+-- Clean Reset: Drop Existing Database & Tables for Re-execution
 DROP DATABASE IF EXISTS `enterprise_dms`;
 CREATE DATABASE `enterprise_dms` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE `enterprise_dms`;
@@ -42,7 +42,6 @@ DROP TABLE IF EXISTS `permissions`;
 CREATE TABLE `permissions` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `code` VARCHAR(100) NOT NULL UNIQUE,
-  
   `description` TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -79,7 +78,25 @@ CREATE TABLE `users` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------------------
--- 6. DOCUMENTS
+-- 6. FOLDERS (Bikramshila Directory Hierarchy)
+-- ----------------------------------------------------------------------------
+DROP TABLE IF EXISTS `folders`;
+CREATE TABLE `folders` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `organization_id` INT NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `description` TEXT,
+  `parent_id` INT DEFAULT NULL,
+  `is_operational` TINYINT DEFAULT 0,
+  `created_by` INT DEFAULT NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`parent_id`) REFERENCES `folders`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ----------------------------------------------------------------------------
+-- 7. DOCUMENTS
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS `documents`;
 CREATE TABLE `documents` (
@@ -90,9 +107,9 @@ CREATE TABLE `documents` (
   `description` TEXT,
   `category` VARCHAR(100) DEFAULT 'General',
   `document_type` VARCHAR(50) NOT NULL,
-  `status` VARCHAR(50) NOT NULL DEFAULT 'PENDING_REVIEW_1',
+  `status` VARCHAR(50) NOT NULL DEFAULT 'FINAL_APPROVED',
   `current_version_id` INT DEFAULT NULL,
-  `current_version_number` VARCHAR(20) DEFAULT 'V1',
+  `current_version_number` VARCHAR(50) DEFAULT 'General Version V1',
   `is_locked` TINYINT DEFAULT 0,
   `folder_id` INT DEFAULT NULL,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -103,15 +120,15 @@ CREATE TABLE `documents` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------------------
--- 7. DOCUMENT_VERSIONS
+-- 8. DOCUMENT_VERSIONS
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS `document_versions`;
 CREATE TABLE `document_versions` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `document_id` INT NOT NULL,
   `organization_id` INT NOT NULL,
-  `version_number` VARCHAR(50) NOT NULL,
-  `version_index` DOUBLE NOT NULL,
+  `version_number` VARCHAR(50) NOT NULL DEFAULT 'General Version V1',
+  `version_index` DOUBLE NOT NULL DEFAULT 1.0,
   `original_filename` VARCHAR(255) NOT NULL,
   `storage_key` VARCHAR(255) NOT NULL,
   `file_size` BIGINT NOT NULL,
@@ -119,7 +136,7 @@ CREATE TABLE `document_versions` (
   `file_hash` VARCHAR(100) NOT NULL,
   `uploaded_by` INT NOT NULL,
   `change_description` TEXT,
-  `review_status` VARCHAR(50) DEFAULT 'PENDING',
+  `review_status` VARCHAR(50) DEFAULT 'FINAL_APPROVED',
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`document_id`) REFERENCES `documents`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON DELETE CASCADE,
@@ -127,7 +144,7 @@ CREATE TABLE `document_versions` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------------------
--- 8. DOCUMENT_REVIEWS
+-- 9. DOCUMENT_REVIEWS
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS `document_reviews`;
 CREATE TABLE `document_reviews` (
@@ -147,7 +164,7 @@ CREATE TABLE `document_reviews` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------------------
--- 9. NOTIFICATIONS
+-- 10. NOTIFICATIONS
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS `notifications`;
 CREATE TABLE `notifications` (
@@ -165,7 +182,7 @@ CREATE TABLE `notifications` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------------------
--- 10. EMAIL_LOGS (Outbox & Live Email Monitor Log)
+-- 11. EMAIL_LOGS (Outbox & Live Email Monitor Log)
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS `email_logs`;
 CREATE TABLE `email_logs` (
@@ -181,7 +198,7 @@ CREATE TABLE `email_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------------------
--- 11. AUDIT_LOGS (Append-Only Security Audit Trail)
+-- 12. AUDIT_LOGS (Append-Only Security Audit Trail)
 -- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS `audit_logs`;
 CREATE TABLE `audit_logs` (
@@ -200,122 +217,103 @@ CREATE TABLE `audit_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ----------------------------------------------------------------------------
--- 12. FOLDERS (Tenant Document Organization Directories)
+-- 13. FOLDER_PERMISSIONS (Access Control Rules for Folders)
 -- ----------------------------------------------------------------------------
-DROP TABLE IF EXISTS `folders`;
-CREATE TABLE `folders` (
+DROP TABLE IF EXISTS `folder_permissions`;
+CREATE TABLE `folder_permissions` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `organization_id` INT NOT NULL,
-  `name` VARCHAR(255) NOT NULL,
-  `description` TEXT,
-  `parent_id` INT DEFAULT NULL,
-  `created_by` INT DEFAULT NULL,
+  `folder_id` INT NOT NULL,
+  `role_id` INT DEFAULT NULL,
+  `user_id` INT DEFAULT NULL,
+  `permission_level` VARCHAR(50) NOT NULL DEFAULT 'FULL_CONTROL',
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`parent_id`) REFERENCES `folders`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+  FOREIGN KEY (`folder_id`) REFERENCES `folders`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================================
 -- SEED DATA INSERTION
 -- ============================================================================
 
--- 1. Insert System Roles matching Master User Matrix Requirements
--- NOTIFICATION MATRIX RULES:
--- - Document Uploader (Om Jha): Receives ALL notifications (Upload, Stage 1/2 Approvals/Rejections, Final Approval)
--- - Stage 1 Reviewer (Rahul Dey): Receives Stage 1 Review alerts, Stage 2 Rejections, Final Approvals
--- - Stage 2 Reviewer (Kiran Sankar Chowdhury): Receives Stage 1 Approvals, Stage 2 Review alerts, Stage 2 Rejections
--- - Final Approver (Manoj Ghosh): Receives notification ONLY when BOTH Reviewer 1 & Reviewer 2 approve with comments (FINAL_APPROVAL_PENDING)
--- - Departmental Managers (Mukesh Prasad, Pintu Bhukta, Somenath Mondal): Receive ONLY initial NEW_DOCUMENT_UPLOADED notifications
--- - Excluded Managers (Ayush Khaitan, Arunabha Pyne): Receive 0 notifications across all workflow stages
-INSERT INTO `roles` (`id`, `name`, `description`) VALUES
-(1, 'SUPER_ADMIN', 'Global Super Administrator dedicated to User Management & Governance (Restricted from Document Upload / Revision Editing)'),
-(2, 'RAHEE_ADMIN_REVIEWER', 'Company 1 Admin & Step 1 Reviewer (Rahul Dey)'),
-(3, 'RAHEE_EXEC_ADMIN', 'Company 1 Executive Admin & User Manager (Rajib Ghosh)'),
-(4, 'STEP2_REVIEWER', 'Step 2 Workflow Reviewer (Kiran Sankar Chowdhury)'),
-(5, 'FINAL_APPROVER', 'Step 3 Final Document Approver (Manoj Ghosh)'),
-(6, 'MANAGER_OVERSIGHT', 'Departmental Manager Oversight & Reports (Mukesh Prasad, Pintu Bhukta, Somenath Mondal, Ayush Khaitan, Arunabha Pyne)'),
-(7, 'DOCUMENT_UPLOADER', 'Document Uploader & Revision Submitter (Om Jha)'),
-(8, 'IRCON_ADMIN_REVIEWER', 'Company 2 Admin & Step 1 Reviewer (Shardu Kumar Rastogi)');
-
--- 2. Insert System Permission Keys (RBAC)
-INSERT INTO `permissions` (`id`, `code`, `description`) VALUES
-(1, 'upload', 'Allows uploading new Microsoft Word, PDF, Excel, PPTX, and Image files'),
-(2, 'view', 'Access to document search, metadata, and directory listings'),
-(3, 'preview', 'Allows opening and previewing documents in browser streams'),
-(4, 'edit', 'Allows updating document metadata and uploading revised versions'),
-(5, 'download', 'Allows downloading original binary files to local disk'),
-(6, 'approve_reject', 'Allows intermediate step approvals or rejections in workflow'),
-(7, 'final_approve', 'Grants Step 3 Final Approver status to publish documents into APPROVED state'),
-(8, 'manage_users', 'Grants ability to create/edit user accounts and assign permissions'),
-(9, 'view_audit_logs', 'Access to system-wide security audit trail logs'),
-(10, 'view_reports', 'Access to storage breakdown, employee metrics, and workflow reports'),
-(11, 'manage_folders', 'Allows creating and managing tenant document folders');
-
--- 3. Insert Role-Permissions Mappings
--- Role 1 (SUPER_ADMIN): User Management, Governance, View, Preview, Download, Audit Logs, Reports, Folder Management
-INSERT INTO `role_permissions` (`role_id`, `permission_id`) VALUES
-(1, 2), (1, 3), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10), (1, 11),
-
--- Role 2 (RAHEE_ADMIN_REVIEWER - Rahul Dey): view, preview, edit, download, approve_reject, view_audit_logs, view_reports, manage_folders
-(2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 9), (2, 10), (2, 11),
-
--- Role 3 (RAHEE_EXEC_ADMIN - Rajib Ghosh): upload, view, preview, edit, download, approve_reject, manage_users, view_audit_logs, view_reports, manage_folders
-(3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (3, 6), (3, 8), (3, 9), (3, 10), (3, 11),
-
--- Role 4 (STEP2_REVIEWER - Kiran Sankar Chowdhury): view, preview, edit, download, approve_reject, view_audit_logs, view_reports
-(4, 2), (4, 3), (4, 4), (4, 5), (4, 6), (4, 9), (4, 10),
-
--- Role 5 (FINAL_APPROVER - Manoj Ghosh): view, preview, download, approve_reject, final_approve
-(5, 2), (5, 3), (5, 5), (5, 6), (5, 7),
-
--- Role 6 (MANAGER_OVERSIGHT - Mukesh Prasad, Pintu Bhukta, Somenath Mondal, Ayush Khaitan, Arunabha Pyne): view, preview, edit, download, view_audit_logs, view_reports
-(6, 2), (6, 3), (6, 4), (6, 5), (6, 9), (6, 10),
-
--- Role 7 (DOCUMENT_UPLOADER - Om Jha, Chandra Bijay Singh): upload, view, preview, edit, download (STRICTLY EXCLUDED from manage_folders)
-(7, 1), (7, 2), (7, 3), (7, 4), (7, 5),
-
--- Role 8 (IRCON_ADMIN_REVIEWER - Shardu Kumar Rastogi): view, preview, download, approve_reject, view_audit_logs, view_reports, manage_folders
-(8, 2), (8, 3), (8, 5), (8, 6), (8, 9), (8, 10), (8, 11);
-
--- 4. Insert Organizations
+-- 1. Insert System Organizations
 INSERT INTO `organizations` (`id`, `name`, `code`, `status`) VALUES
 (1, 'Rahee Infratech Limited', 'RAHEE', 'ACTIVE'),
 (2, 'Ircon International Limited', 'IRCON', 'ACTIVE');
 
--- 5. Insert Master Users with Bcrypt Hashed Standard Professional Passwords
--- Passwords Hashed with bcrypt (Salt factor 10):
--- Rahul Dey: R@hul#Dey2026 (ID 5, Role 2)
--- Rajib Ghosh: R@jib#Ghosh2026 (ID 11, Role 3)
--- Kiran Sankar Chowdhury: K1ran#Sankar2026 (ID 6, Role 4)
--- Manoj Ghosh: M@noj#Ghosh2026 (ID 13, Role 5)
--- Mukesh Kumar Prasad: M@kesh#Prasad2026 (ID 7, Role 6)
--- Pintu Bhukta: P1ntu#Bhukta2026 (ID 8, Role 6)
--- Somenath Mondal: S@menath#Mondal2026 (ID 9, Role 6)
--- Ayush Khaitan: Ayu$h#Khaitan2026 (ID 12, Role 6)
--- Arunabha Pyne: Arun#Pyne2026 (ID 14, Role 6)
--- Om Jha: Om#Jha2026 (ID 10, Role 7: upload, view, preview, edit, download)
--- Shardu Kumar Rastogi: Sh@rdu#Rastogi2026 (ID 2, Role 8)
--- Chandra Bijay Singh: Ch@ndra#Singh2026 (ID 3, Role 7: upload, view, preview, edit, download)
+-- 2. Insert System Roles
+INSERT INTO `roles` (`id`, `name`, `description`) VALUES
+(1, 'SUPER_ADMIN', 'Global Super Administrator dedicated to User Creation & Governance'),
+(2, 'RAHEE_ADMIN_REVIEWER', 'Company 1 Admin (Rahul Dey)'),
+(3, 'RAHEE_EXEC_ADMIN', 'Company 1 Executive Admin'),
+(4, 'STEP2_REVIEWER', 'Workflow Reviewer'),
+(5, 'FINAL_APPROVER', 'Final Approver'),
+(6, 'MANAGER_OVERSIGHT', 'Departmental Manager Oversight & Reports'),
+(7, 'DOCUMENT_UPLOADER', 'Document Uploader & Execution Control'),
+(8, 'IRCON_ADMIN_REVIEWER', 'Company 2 Admin (Om Jha)');
+
+-- 3. Insert System Permission Keys (RBAC)
+INSERT INTO `permissions` (`id`, `code`, `description`) VALUES
+(1, 'upload', 'Allows uploading new Microsoft Word, PDF, Excel, PPTX, Images, and Auto CAD files'),
+(2, 'view', 'Access to document search, metadata, and directory listings'),
+(3, 'preview', 'Allows opening and previewing documents in browser streams'),
+(4, 'edit', 'Allows updating document metadata'),
+(5, 'download', 'Allows downloading original binary files to local disk'),
+(6, 'approve_reject', 'Workflow review permission'),
+(7, 'final_approve', 'Final approval permission'),
+(8, 'manage_users', 'Grants ability to create/edit user accounts and assign permissions'),
+(9, 'view_audit_logs', 'Access to system-wide security audit trail logs'),
+(10, 'view_reports', 'Access to storage breakdown, employee metrics, and reports'),
+(11, 'manage_folders', 'Allows creating and managing tenant document folders');
+
+-- 4. Insert Role-Permissions Mappings
+INSERT INTO `role_permissions` (`role_id`, `permission_id`) VALUES
+(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 8), (1, 9), (1, 10), (1, 11), -- SUPER_ADMIN (Rajib Ghosh)
+(2, 1), (2, 2), (2, 3), (2, 4), (2, 5), (2, 9), (2, 10), (2, 11),         -- RAHEE Admin (Rahul Dey)
+(7, 1), (7, 2), (7, 3), (7, 4), (7, 5), (7, 9), (7, 10),                  -- Execution Control / Uploader (Somnath Mondal)
+(6, 2), (6, 3), (6, 5), (6, 9), (6, 10),                                 -- Manager Oversight / Viewers
+(8, 1), (8, 2), (8, 3), (8, 4), (8, 5), (8, 9), (8, 10), (8, 11);         -- IRCON Admin (Om Jha)
+
+-- 5. Insert Master Users with Bcrypt Hashed Passwords (Salt Factor 10)
+-- Credentials & Roles:
+-- Rajib Ghosh: rajib.g@rahee.com / R@jib#Ghosh2026 (ID 11, Super-Admin - Exclusive File/Folder Deletion, Archival & Restoration; Folder Creation under Bikramshila Root Allowed; File Upload Restricted)
+-- Rahul Dey: rahul.d@rahee.com / R@hul#Dey2026 (ID 5, Rahee Admin - Folder Creation & File Upload under Bikramshila/RAHEE & subfolders Allowed; Deletion, Archival & Restoration Restricted)
+-- Somnath Mondal: s.mondal@rahee.com / S@menath#Mondal2026 (ID 9, Execution Control Uploader - Role ID 7, File Upload under Bikramshila/RAHEE & subfolders Allowed; Deletion, Archival & Restoration Restricted)
+-- Om Jha: om.jha@ircon.org / Om#Jha2026 (ID 10, Ircon Admin - Folder Creation & File Upload under Bikramshila/IRCON & subfolders Allowed; Deletion, Archival & Restoration Restricted)
+-- Shardu Kumar Rastogi: shardu.rastogi@ircon.org / Sh@rdu#Rastogi2026 (ID 2, Execution Control Viewer - Role ID 6, Upload Strictly Blocked, Universal View/Download/Notifications Allowed)
+-- Chandra Bijay Singh: chandra.singh@ircon.org / Ch@ndra#Singh2026 (ID 3, Review / Viewer)
+-- Kiran Sankar Chowdhury: kiransankar.c@rahee.com / K1ran#Sankar2026 (ID 6, Manager Oversight)
+-- Mukesh Kumar Prasad: mukesh.p@rahee.com / M@kesh#Prasad2026 (ID 7, Manager Oversight)
+-- Pintu Bhukta: pintu.b@rahee.com / P1ntu#Bhukta2026 (ID 8, Manager Oversight)
+-- 4 Notification-Excluded View-Only Users (Universal View & Download Access Repository-Wide, Excluded from Automated Email & In-App Notifications):
+-- Manish Kumar Patra: manish.p@rahee.com / M@nish#Patra2026 (ID 16, Viewer)
+-- Ayush Khaitan: ayush.k@rahee.com / Ayu$h#Khaitan2026 (ID 12, Manager Oversight)
+-- Manoj Ghosh: manoj.g@rahee.com / M@noj#Ghosh2026 (ID 13, Manager Oversight)
+-- Arunabha Pyne: arunabha.p@rahee.com / Arun#Pyne2026 (ID 14, Manager Oversight)
 
 INSERT INTO `users` (`id`, `organization_id`, `name`, `email`, `password_hash`, `role_id`, `status`) VALUES
-(1, NULL, 'Global System Administrator', 'superadmin@enterprise-dms.com', '$2b$10$FF4BA6QYhBaNi6LjkrEQdevYpsd1wRpkyb4lmVPqFhJDWCTfiO4a.', 1, 'ACTIVE'),
-(5, 1, 'Rahul Dey', 'rahul.d@rahee.com', '$2b$10$q9PiUOS1l57C9k7Jb4SLPuJAXyRDg47JlGhf8wvd4RhzHP/AmGYSu', 2, 'ACTIVE'),
-(11, NULL, 'Rajib Ghosh', 'rajib.g@rahee.com', '$2b$10$mYS9NUXnarjW178pXbCk8Om6fQCmQPgaaCSAJGx8MzVkDu3CWKEeq', 1, 'ACTIVE'),
-(6, 1, 'Kiran Sankar Chowdhury', 'kiransankar.c@rahee.com', '$2b$10$ENdoIKss08l.Mez1TSTt0OXhCC88lmGSPjcuSIVWyf5EyArJw.Dam', 4, 'ACTIVE'),
-(13, 1, 'Manoj Ghosh', 'manoj.g@rahee.com', '$2b$10$d/Q0AO3V.1.wli8B/JN1vuCtaUcOO/bvi1Jax8k9JdUpUDRG6kDQm', 5, 'ACTIVE'),
-(7, 1, 'Mukesh Kumar Prasad', 'mukesh.p@rahee.com', '$2b$10$rL/e5CIaNpwkoGxQVw3mg.TF53GS4PsyZKtIlcfbkiAF0Iyx0KCqC', 6, 'ACTIVE'),
-(8, 1, 'Pintu Bhukta', 'pintu.b@rahee.com', '$2b$10$zKXB0./MaOCO0cfsGJnrI.w/oYCdCFLvVsU9JEIXgSDzUuIMcvlDa', 6, 'ACTIVE'),
-(9, 1, 'Somenath Mondal', 's.mondal@rahee.com', '$2b$10$tCLIPGZggpfmu0mUNzeL2eUQXoUeDAL3mk7hL2Hea7HXNXsRnXcE6', 6, 'ACTIVE'),
-(12, 1, 'Ayush Khaitan', 'ayush.k@rahee.com', '$2b$10$9ZkI/yMjvgzt.RoB/Ylv1.cY6ch0sdwjXN59ZaCdaB/sFqmU2e.I6', 6, 'ACTIVE'),
-(14, 1, 'Arunabha Pyne', 'arunabha.p@rahee.com', '$2b$10$/mmbLP5vfnhmpdjWMLRMUORH3LiXklJEXzLlU1Sgs4eghSWUaG2Ny', 6, 'ACTIVE'),
-(10, 1, 'Om Jha', 'om.jha@rahee.com', '$2b$10$UVp8VUnrsQmtOLJ35FQiJeaQJK.XPHZs6ZfqdcRCE8yAp09uak2Qe', 7, 'ACTIVE'),
-(2, 2, 'Shardu Kumar Rastogi', 'shardu.rastogi@ircon.org', '$2b$10$E06H1hNYHFpNscLtHDFm6u5Xa3/PfOilfDUf4wTgWaXdKnMtQPZnO', 8, 'ACTIVE'),
-(3, 2, 'Chandra Bijay Singh', 'chandra.singh@ircon.org', '$2b$10$EopJDrDaS1q6AcFnKtuVL.bTKltEbpihoN36sVqxH5lQPpnDU05X.', 7, 'ACTIVE');
+(1, NULL, 'Global System Administrator', 'superadmin@enterprise-dms.com', '$2b$10$mQ.6gKbL9zEP9g8g3qClMewHwdZ2WQ8TG3bPaCRhkvzQUUs.q38Zm', 1, 'ACTIVE'),
+(11, NULL, 'Rajib Ghosh', 'rajib.g@rahee.com', '$2b$10$Xlqr3YDXrSWJNbuV6O6BouCYxhJztbqDad05VkSUU4XACEExP8TSC', 1, 'ACTIVE'),
+(5, 1, 'Rahul Dey', 'rahul.d@rahee.com', '$2b$10$l5qSA3Td4EttufhTtrevluCc9lTiWGDIMeuYLyhIfqdkXkN3tV7iW', 2, 'ACTIVE'),
+(10, 2, 'Om Jha', 'om.jha@ircon.org', '$2b$10$S4CXCLBYv6SNeyJEUNovbujSXDjMctYW3r69yoBq3schQXc2ToBdu', 8, 'ACTIVE'),
+(9, 1, 'Somnath Mondal', 's.mondal@rahee.com', '$2b$10$EWQkVdrsipoRrtzQvnWT1.vl3xhGKH8ZGWSAqUJv868Z724/B69jS', 7, 'ACTIVE'),
+(2, 2, 'Shardu Kumar Rastogi', 'shardu.rastogi@ircon.org', '$2b$10$b/B65d9xcy475WikvxsRFurwCUq57C8Jsjl40Ng0anU5CJjVNOYsG', 6, 'ACTIVE'),
+(3, 2, 'Chandra Bijay Singh', 'chandra.singh@ircon.org', '$2b$10$G1HlihXF1CBfy.AocWjl2.C8SiAsGav1SZI05.OgRjIP5Bve1yf4e', 6, 'ACTIVE'),
+(6, 1, 'Kiran Sankar Chowdhury', 'kiransankar.c@rahee.com', '$2b$10$qsU5jeTv3fQJDWNchuvUp.kt8dLVjm0wjMxnZEIOO1Lv1Q06akvH.', 6, 'ACTIVE'),
+(7, 1, 'Mukesh Kumar Prasad', 'mukesh.p@rahee.com', '$2b$10$nDXXMDd8ycKHh2o/9TvkMejxpq6S1H0rHR8PaWtsjfbIpcjTVHSPS', 6, 'ACTIVE'),
+(8, 1, 'Pintu Bhukta', 'pintu.b@rahee.com', '$2b$10$jHyQenniWGW05Qy3/I3z6eWmrUUuEcJ8vgEtZkD0jp4ja5qA5C43O', 6, 'ACTIVE'),
+(16, 1, 'Manish Kumar Patra', 'manish.p@rahee.com', '$2b$10$uy2cP1HufGFspzyjOtDDNu8ORf0bvUaGuHFPi8XJJBun.vwKjL7vO', 6, 'ACTIVE'),
+(12, 1, 'Ayush Khaitan', 'ayush.k@rahee.com', '$2b$10$HuNw.Pu/mfMC3q7z9rMb2.b6e1J2giH9o4pnaIJv7CROT24RkbzMS', 6, 'ACTIVE'),
+(13, 1, 'Manoj Ghosh', 'manoj.g@rahee.com', '$2b$10$JNn93Q5ZkAff.f/lqLKRGOv9ilLwXaC7ryaSLFxBtGYe08vvxxHpK', 6, 'ACTIVE'),
+(14, 1, 'Arunabha Pyne', 'arunabha.p@rahee.com', '$2b$10$OtxsRqrZAL3omOfQnivdGeqoK4m/07es0uytlZWiSbYeFecaiuX7G', 6, 'ACTIVE');
 
--- 6. Insert System Audit Log Initialization Entry
+-- 6. Insert Bikramshila Directory Hierarchy Folders
+INSERT INTO `folders` (`id`, `organization_id`, `name`, `description`, `parent_id`, `is_operational`, `created_by`) VALUES
+(4, 1, 'Bikramshila', 'Main Bikramshila Root Project Folder', NULL, 0, 11),
+(5, 2, 'IRCON', 'Ircon International Dedicated Sub-Folder', 4, 0, 10),
+(6, 1, 'RAHEE', 'Rahee Infratech Dedicated Sub-Folder', 4, 0, 5);
+
+-- 7. Insert System Audit Log Initialization Entry
 INSERT INTO `audit_logs` (`organization_id`, `user_id`, `user_email`, `user_name`, `action`, `comment`, `ip_address`) VALUES
-(NULL, 1, 'superadmin@enterprise-dms.com', 'Global System Administrator', 'SYSTEM_INITIALIZATION', 'Enterprise DMS database schema initialized with Master RBAC specifications.', '127.0.0.1');
+(NULL, 11, 'rajib.g@rahee.com', 'Rajib Ghosh', 'SYSTEM_INITIALIZATION', 'Enterprise DMS database schema initialized with Bikramshila Directory Hierarchy & Bikramshila Manual Archival Policy.', '127.0.0.1');
 
 SET FOREIGN_KEY_CHECKS = 1;
 

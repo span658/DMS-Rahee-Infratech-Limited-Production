@@ -5,9 +5,10 @@ const statusConfig = {
   APPROVED_BY_REVIEWER_1: { label: 'Approved by Stage 1', bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300' },
   PENDING_REVIEW_2: { label: 'Pending Stage 2 Review', bg: 'bg-indigo-100', text: 'text-indigo-800', border: 'border-indigo-300' },
   APPROVED_BY_REVIEWER_2: { label: 'Approved by Stage 2', bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300' },
-  FINAL_APPROVAL_PENDING: { label: 'Pending Final Approval', bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300' },
-  FINAL_APPROVED: { label: 'Final Approved & Locked', bg: 'bg-emerald-100', text: 'text-emerald-800', border: 'border-emerald-300' },
-  REJECTED: { label: 'Changes Requested (Rejected)', bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-300' }
+  FINAL_APPROVAL_PENDING: { label: 'Pending Approval', bg: 'bg-orange-100', text: 'text-orange-800', border: 'border-orange-300' },
+  FINAL_APPROVED: { label: 'Active', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+  REJECTED: { label: 'Changes Requested', bg: 'bg-rose-100', text: 'text-rose-800', border: 'border-rose-300' },
+  ARCHIVED: { label: 'Archived (Unapproved >7 Days)', bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-300' }
 };
 
 export default function StatusBadge({ status }) {

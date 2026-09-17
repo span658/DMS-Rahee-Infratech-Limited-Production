@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../config/db');
 const { logAudit } = require('../services/audit.service');
 const { sendNotification } = require('../services/notification.service');
+const { MULTI_TENANT_ISOLATION_ENABLED } = require('../config/workflow.config');
 
 async function getUsers(req, res) {
   try {
@@ -15,8 +16,8 @@ async function getUsers(req, res) {
     `;
     let params = [];
 
-    // Tenant filter: Normal users only see their organization
-    if (!req.user.is_super_admin) {
+    // Tenant filter: Normal users only see their organization if tenant isolation is enabled
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin) {
       sql += ' WHERE u.organization_id = ?';
       params.push(req.user.organization_id);
     } else if (req.query.organization_id) {
@@ -37,15 +38,19 @@ async function createUser(req, res) {
   try {
     const { name, email, password, role_id, organization_id } = req.body;
 
+    // STRICT RULE: The Super-Admin holds complete executive authority and is strictly responsible for creating users for both companies in the system.
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: User account creation is strictly restricted to the Global Super Admin ONLY.'
+      });
+    }
+
     if (!name || !email || !password || !role_id) {
       return res.status(400).json({ success: false, message: 'Name, Email, Password, and Role are required.' });
     }
 
-    // Determine target organization_id
-    let targetOrgId = req.user.organization_id;
-    if (req.user.is_super_admin) {
-      targetOrgId = organization_id ? parseInt(organization_id) : null;
-    }
+    const targetOrgId = organization_id ? parseInt(organization_id) : (req.user.organization_id || 1);
 
     // Check duplicate email
     const existing = await db.query('SELECT id FROM users WHERE LOWER(email) = LOWER(?)', [email.trim()]);
@@ -118,8 +123,8 @@ async function updateUserStatus(req, res) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    if (!req.user.is_super_admin && targetUser.organization_id !== req.user.organization_id) {
-      return res.status(403).json({ success: false, message: 'Forbidden: Cannot manage user outside your organization.' });
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({ success: false, message: 'Forbidden: User account status management is strictly restricted to the Global Super Admin ONLY.' });
     }
 
     await db.query('UPDATE users SET status = ? WHERE id = ?', [status, id]);
@@ -172,8 +177,8 @@ async function deleteUser(req, res) {
       return res.status(404).json({ success: false, message: 'User account not found.' });
     }
 
-    if (!req.user.is_super_admin && targetUser.organization_id !== req.user.organization_id) {
-      return res.status(403).json({ success: false, message: 'Forbidden: Cannot delete user outside your organization.' });
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({ success: false, message: 'Forbidden: User account deletion is strictly restricted to the Global Super Admin ONLY.' });
     }
 
     await db.query('DELETE FROM users WHERE id = ?', [targetId]);

@@ -61,6 +61,45 @@ async function initDatabase() {
 
   await createTables();
   await seedInitialData();
+  await seedBksFolders();
+  try {
+    await query("UPDATE users SET role_id = 6 WHERE email = 'shardu.rastogi@ircon.org'");
+    await query("INSERT INTO role_permissions (role_id, permission_id) VALUES (7, 9)");
+    await query("INSERT INTO role_permissions (role_id, permission_id) VALUES (7, 10)");
+  } catch (e) {}
+}
+
+async function seedBksFolders() {
+  try {
+    const existingBks = await query("SELECT id, name FROM folders WHERE UPPER(name) IN ('BIKRAMSHILA', 'BKS') AND parent_id IS NULL");
+    let bksId;
+    if (!existingBks || existingBks.length === 0) {
+      const res = await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (1, 'Bikramshila', 'Main Central Bikramshila Folder Directory', NULL, 0)");
+      bksId = res.insertId;
+      console.log('Seeded root Bikramshila folder with ID:', bksId);
+    } else {
+      bksId = existingBks[0].id;
+      if (existingBks[0].name !== 'Bikramshila') {
+        await query("UPDATE folders SET name = 'Bikramshila', description = 'Main Central Bikramshila Folder Directory' WHERE id = ?", [bksId]);
+      }
+    }
+
+    // Seed IRCON subfolder under Bikramshila
+    const existingIrcon = await query("SELECT id FROM folders WHERE UPPER(name) = 'IRCON' AND parent_id = ?", [bksId]);
+    if (!existingIrcon || existingIrcon.length === 0) {
+      await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (2, 'IRCON', 'Ircon International Limited Documents', ?, 0)", [bksId]);
+      console.log('Seeded IRCON subfolder under Bikramshila');
+    }
+
+    // Seed RAHEE subfolder under Bikramshila
+    const existingRahee = await query("SELECT id FROM folders WHERE UPPER(name) = 'RAHEE' AND parent_id = ?", [bksId]);
+    if (!existingRahee || existingRahee.length === 0) {
+      await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (1, 'RAHEE', 'Rahee Infratech Limited Documents', ?, 0)", [bksId]);
+      console.log('Seeded RAHEE subfolder under Bikramshila');
+    }
+  } catch (e) {
+    console.warn('Bikramshila folder seeding warning:', e.message);
+  }
 }
 
 // Universal Query Helper
@@ -269,6 +308,7 @@ async function createTables() {
       name VARCHAR(255) NOT NULL,
       description TEXT,
       parent_id INTEGER DEFAULT NULL,
+      is_operational INTEGER DEFAULT 0,
       created_by INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -280,6 +320,25 @@ async function createTables() {
   } catch (e) {
     // Column already exists
   }
+
+  // Migration: Add is_operational to folders
+  try {
+    await query('ALTER TABLE folders ADD COLUMN is_operational INTEGER DEFAULT 0');
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Folder Permissions Table (Access Control for Folders & Subfolders)
+  await query(`
+    CREATE TABLE IF NOT EXISTS folder_permissions (
+      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      folder_id INTEGER NOT NULL,
+      role_id INTEGER,
+      user_id INTEGER,
+      permission_level VARCHAR(50) NOT NULL DEFAULT 'FULL_CONTROL',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 
   // Migration: Add folder_id to documents
   try {
@@ -382,10 +441,10 @@ async function seedInitialData() {
   await addRolePermissions(5, [2, 3, 5, 7]);
   // 6: MANAGER_OVERSIGHT (Mukesh Prasad, Pintu Bhukta, Somenath Mondal, Ayush Khaitan, Arunabha Pyne: view, preview, edit, download, view_audit_logs, view_reports)
   await addRolePermissions(6, [2, 3, 4, 5, 9, 10]);
-  // 7: DOCUMENT_UPLOADER (Om Jha, Chandra Bijay Singh: upload, view, preview, edit, download)
-  await addRolePermissions(7, [1, 2, 3, 4, 5]);
-  // 8: IRCON_ADMIN_REVIEWER (Shardu Kumar Rastogi: view, preview, download, approve_reject, view_audit_logs, view_reports)
-  await addRolePermissions(8, [2, 3, 5, 6, 9, 10]);
+  // 7: DOCUMENT_UPLOADER (Somnath Mondal: upload, view, preview, edit, download, view_audit_logs, view_reports)
+  await addRolePermissions(7, [1, 2, 3, 4, 5, 9, 10]);
+  // 8: IRCON_ADMIN (Om Jha / Company Admin: upload, view, preview, download, approve_reject, view_audit_logs, view_reports, manage_folders)
+  await addRolePermissions(8, [1, 2, 3, 4, 5, 6, 9, 10, 11]);
 
   // 3. Organizations
   await query('INSERT INTO organizations (id, name, code, status) VALUES (?, ?, ?, ?)', [
@@ -429,7 +488,7 @@ async function seedInitialData() {
       name: 'Kiran Sankar Chowdhury',
       email: 'kiransankar.c@rahee.com',
       password_hash: await bcrypt.hash('K1ran#Sankar2026', 10),
-      role_id: 4 // STEP2_REVIEWER: view, preview, edit, download, approve_reject, view_audit_logs, view_reports
+      role_id: 6 // MANAGER_OVERSIGHT / VIEWER: view, preview, download, view_audit_logs, view_reports
     },
     {
       id: 13,
@@ -437,7 +496,7 @@ async function seedInitialData() {
       name: 'Manoj Ghosh',
       email: 'manoj.g@rahee.com',
       password_hash: await bcrypt.hash('M@noj#Ghosh2026', 10),
-      role_id: 5 // FINAL_APPROVER: view, preview, download, final_approve
+      role_id: 6 // MANAGER_OVERSIGHT: view, preview, download, view_audit_logs, view_reports
     },
     {
       id: 7,
@@ -461,7 +520,7 @@ async function seedInitialData() {
       name: 'Somenath Mondal',
       email: 's.mondal@rahee.com',
       password_hash: await bcrypt.hash('S@menath#Mondal2026', 10),
-      role_id: 6 // MANAGER_OVERSIGHT: view, preview, download, view_audit_logs, view_reports
+      role_id: 7 // EXECUTION_CONTROL: upload, view, preview, edit, download
     },
     {
       id: 12,
@@ -480,21 +539,29 @@ async function seedInitialData() {
       role_id: 6 // MANAGER_OVERSIGHT: view, preview, download, view_audit_logs, view_reports
     },
     {
-      id: 10,
+      id: 15,
       organization_id: 1,
-      name: 'Om Jha',
-      email: 'om.jha@rahee.com',
-      password_hash: await bcrypt.hash('Om#Jha2026', 10),
-      role_id: 7 // DOCUMENT_UPLOADER: upload, view, preview, edit, download
+      name: 'Manish Kumar Patra',
+      email: 'manish.p@rahee.com',
+      password_hash: await bcrypt.hash('M@nish#Patra2026', 10),
+      role_id: 6 // VIEWER / MANAGER_OVERSIGHT: view, preview, download, view_audit_logs, view_reports
     },
     // Company 2: Ircon International Limited Users
+    {
+      id: 10,
+      organization_id: 2,
+      name: 'Om Jha',
+      email: 'om.jha@ircon.org',
+      password_hash: await bcrypt.hash('Om#Jha2026', 10),
+      role_id: 8 // IRCON Admin: create_folders, upload, view, preview, edit, download, view_audit_logs, view_reports
+    },
     {
       id: 2,
       organization_id: 2,
       name: 'Shardu Kumar Rastogi',
       email: 'shardu.rastogi@ircon.org',
       password_hash: await bcrypt.hash('Sh@rdu#Rastogi2026', 10),
-      role_id: 8 // IRCON_ADMIN_REVIEWER: view, preview, download, approve_reject, view_audit_logs, view_reports
+      role_id: 6 // EXECUTION_CONTROL / VIEWER: view, preview, download, view_audit_logs, view_reports
     },
     {
       id: 3,
@@ -502,7 +569,7 @@ async function seedInitialData() {
       name: 'Chandra Bijay Singh',
       email: 'chandra.singh@ircon.org',
       password_hash: await bcrypt.hash('Ch@ndra#Singh2026', 10),
-      role_id: 7 // DOCUMENT_UPLOADER: upload, view, preview, edit, download
+      role_id: 6 // REVIEW / MANAGER: view, preview, download, view_audit_logs, view_reports
     }
   ];
 

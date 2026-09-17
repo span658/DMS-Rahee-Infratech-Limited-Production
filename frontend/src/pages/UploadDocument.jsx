@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import api from '../services/api';
 import { useNavigate } from 'react-router-dom';
-import { Upload, FileText, AlertCircle, CheckCircle, ShieldAlert, ArrowLeft } from 'lucide-react';
+import { Upload, FileText, AlertCircle, CheckCircle, ShieldAlert, ArrowLeft, ExternalLink, Layers } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getFormattedFolderList } from '../utils/folderUtils';
+import StatusBadge from '../components/StatusBadge';
 
 export default function UploadDocument() {
   const { user } = useAuth();
@@ -19,36 +20,30 @@ export default function UploadDocument() {
   const [dragActive, setDragActive] = useState(false);
   const navigate = useNavigate();
 
-  React.useEffect(() => {
+  // Existing documents preview matching selected documentType
+  const [existingDocs, setExistingDocs] = useState([]);
+  const [loadingExistingDocs, setLoadingExistingDocs] = useState(false);
+
+  useEffect(() => {
     api.get('/folders').then(res => {
       if (res.data.success) setFolders(res.data.folders);
     }).catch(err => console.error(err));
   }, []);
 
-  const isRahulDey = user?.role_name === 'RAHEE_ADMIN_REVIEWER' || user?.email?.toLowerCase() === 'rahul.d@rahee.com';
+  useEffect(() => {
+    if (!documentType) return;
+    setLoadingExistingDocs(true);
+    api.get(`/documents?document_type=${documentType}`)
+      .then(res => {
+        if (res.data.success) {
+          setExistingDocs(res.data.documents || []);
+        }
+      })
+      .catch(err => console.error('Failed to load existing documents:', err))
+      .finally(() => setLoadingExistingDocs(false));
+  }, [documentType]);
 
-  if (user?.is_super_admin || isRahulDey) {
-    return (
-      <div className="max-w-xl mx-auto mt-12 bg-white p-8 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
-        <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto text-amber-600">
-          <ShieldAlert className="w-6 h-6" />
-        </div>
-        <h2 className="text-xl font-bold text-slate-900">Document Upload Restricted</h2>
-        <p className="text-xs text-slate-600 leading-relaxed">
-          {isRahulDey 
-            ? 'As Stage 1 Admin Reviewer (Rahul Dey), your role is dedicated to Document Review & Approval. Initial document uploading is strictly reserved for designated Document Uploaders (Om Jha).'
-            : 'As a Super Admin, your role is dedicated to cross-tenant User Management & System Governance. Document uploading is restricted to operational Uploaders within Company 1 and Company 2.'
-          }
-        </p>
-        <Link
-          to="/documents"
-          className="inline-block px-4 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl hover:bg-blue-700 transition"
-        >
-          Return to Document Repository
-        </Link>
-      </div>
-    );
-  }
+
 
   const DANGEROUS_EXTENSIONS = ['.exe', '.bat', '.cmd', '.sh', '.js', '.msi', '.vbs', '.dll'];
 
@@ -83,33 +78,25 @@ export default function UploadDocument() {
       JPEG: 'IMAGE',
       PNG: 'IMAGE',
       WEBP: 'IMAGE',
-      SVG: 'IMAGE'
+      SVG: 'IMAGE',
+      DWG: 'CAD',
+      DXF: 'CAD',
+      STL: 'CAD',
+      OBJ: 'CAD',
+      STEP: 'CAD',
+      STP: 'CAD',
+      IGES: 'CAD'
     };
 
     const detectedType = extTypeMap[rawExt];
     if (!detectedType) {
-      setError(`Unsupported File Format (${ext}). Only PDF, Microsoft Word, Microsoft Excel, Microsoft PowerPoint, and Images are supported.`);
+      setError(`Unsupported File Format (${ext}). Only PDF, Microsoft Word, Microsoft Excel, Microsoft PowerPoint, Images, and CAD files (.dwg, .dxf, .stl, .obj, .step, .stp, .iges) are supported.`);
       setFile(null);
       return;
     }
 
-    const typeLabels = {
-      PDF: 'PDF Document',
-      WORD: 'Microsoft Word',
-      EXCEL: 'Microsoft Excel',
-      POWERPOINT: 'Microsoft PowerPoint',
-      IMAGE: 'Image'
-    };
-
-    // Strict Type Mismatch Validation Check against User's Selected Dropdown Option
-    if (documentType !== detectedType) {
-      const selectedLabel = typeLabels[documentType] || documentType;
-      const detectedLabel = typeLabels[detectedType] || detectedType;
-      setError(`Validation Error: You selected '${selectedLabel}', but uploaded a ${detectedLabel} file (${ext}). Please select '${detectedLabel}' in the dropdown or attach a matching file.`);
-      setFile(null);
-      return;
-    }
-
+    // Automatically set Document Type dropdown to match attached file format!
+    setDocumentType(detectedType);
     setFile(selectedFile);
   };
 
@@ -125,8 +112,10 @@ export default function UploadDocument() {
         return '.ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation';
       case 'IMAGE':
         return '.jpg,.jpeg,.png,.webp,.svg,image/*';
+      case 'CAD':
+        return '.dwg,.dxf,.stl,.obj,.step,.stp,.iges';
       default:
-        return '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp';
+        return '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.dwg,.dxf,.stl,.obj,.step,.stp,.iges';
     }
   };
 
@@ -149,7 +138,14 @@ export default function UploadDocument() {
         JPEG: 'IMAGE',
         PNG: 'IMAGE',
         WEBP: 'IMAGE',
-        SVG: 'IMAGE'
+        SVG: 'IMAGE',
+        DWG: 'CAD',
+        DXF: 'CAD',
+        STL: 'CAD',
+        OBJ: 'CAD',
+        STEP: 'CAD',
+        STP: 'CAD',
+        IGES: 'CAD'
       };
       const detectedType = extTypeMap[rawExt];
       if (detectedType && newType !== detectedType) {
@@ -182,11 +178,18 @@ export default function UploadDocument() {
       JPEG: 'IMAGE',
       PNG: 'IMAGE',
       WEBP: 'IMAGE',
-      SVG: 'IMAGE'
+      SVG: 'IMAGE',
+      DWG: 'CAD',
+      DXF: 'CAD',
+      STL: 'CAD',
+      OBJ: 'CAD',
+      STEP: 'CAD',
+      STP: 'CAD',
+      IGES: 'CAD'
     };
     const detectedType = extTypeMap[ext];
     if (!detectedType) {
-      setError(`Unsupported File Format (.${ext.toLowerCase()}). Only PDF, Microsoft Word, Microsoft Excel, Microsoft PowerPoint, and Images are supported.`);
+      setError(`Unsupported File Format (.${ext.toLowerCase()}). Only PDF, Microsoft Word, Microsoft Excel, Microsoft PowerPoint, Images, and CAD files (.dwg, .dxf, .stl, .obj, .step, .stp, .iges) are supported.`);
       return;
     }
 
@@ -195,7 +198,8 @@ export default function UploadDocument() {
       WORD: 'Microsoft Word',
       EXCEL: 'Microsoft Excel',
       POWERPOINT: 'Microsoft PowerPoint',
-      IMAGE: 'Image'
+      IMAGE: 'Image',
+      CAD: 'CAD Drawing / 3D Model'
     };
 
     if (documentType !== detectedType) {
@@ -227,6 +231,25 @@ export default function UploadDocument() {
       setError(err.response?.data?.message || 'Failed to upload document.');
     }
   };
+
+  const userEmail = user?.email?.toLowerCase() || '';
+  const isRaheeUploader = userEmail === 'rahul.d@rahee.com' || userEmail === 's.mondal@rahee.com' || [2, 3, 7].includes(user?.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN', 'DOCUMENT_UPLOADER'].includes(user?.role_name);
+  const isIrconUploader = userEmail.startsWith('om.jha@') || user?.role_id === 8 || ['IRCON_ADMIN_REVIEWER', 'IRCON_ADMIN'].includes(user?.role_name);
+
+  if (user?.is_super_admin || (!isRaheeUploader && !isIrconUploader)) {
+    return (
+      <div className="max-w-xl mx-auto my-12 p-8 bg-white rounded-2xl border border-rose-200 shadow-xl text-center space-y-4">
+        <ShieldAlert className="w-12 h-12 text-rose-600 mx-auto" />
+        <h2 className="text-lg font-black text-slate-900">Upload Permission Restricted</h2>
+        <p className="text-xs text-slate-600">
+          Document upload is restricted to authorized uploaders (Rahul Dey & Somnath Mondal for Rahee under Bikramshila/RAHEE, Om Jha for Ircon under Bikramshila/IRCON).
+        </p>
+        <Link to="/documents" className="inline-block px-5 py-2.5 bg-slate-900 text-white font-bold text-xs rounded-xl hover:bg-slate-800 transition">
+          Return to Central Repository
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -285,24 +308,80 @@ export default function UploadDocument() {
                 <option value="EXCEL">📊 Microsoft Excel (.xls, .xlsx)</option>
                 <option value="POWERPOINT">📊 Microsoft PowerPoint (.ppt, .pptx)</option>
                 <option value="IMAGE">🖼️ Image (.jpg, .png, .webp, .svg)</option>
+                <option value="CAD">📐 CAD Drawing / 3D Model (.dwg, .dxf, .stl, .obj, .step, .stp, .iges)</option>
               </select>
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Target Folder (Optional)
+                Target Folder (Filtered by Document Type)
               </label>
               <select
                 value={folderId}
                 onChange={(e) => setFolderId(e.target.value)}
-                className="w-full p-3 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium"
+                className="w-full p-3 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium text-slate-900"
               >
-                <option value="">📁 None (Root Directory)</option>
-                {getFormattedFolderList(folders).map(f => (
-                  <option key={f.id} value={f.id}>
-                    {f.displayName}
-                  </option>
-                ))}
+                <option value="">📁 Auto-Assign Company Subfolder (Bikramshila/{(user?.organization_id === 2 || user?.role_name === 'IRCON_ADMIN_REVIEWER' || user?.role_name === 'IRCON_ADMIN' || user?.email?.toLowerCase().startsWith('om.jha@')) ? 'IRCON' : 'RAHEE'})</option>
+
+                {(() => {
+                  let filteredFolders = folders;
+                  if (!user?.is_super_admin) {
+                    const isIrconUser = user?.organization_id === 2 || user?.role_name === 'IRCON_ADMIN_REVIEWER' || user?.role_name === 'IRCON_ADMIN' || user?.email?.toLowerCase().startsWith('om.jha@');
+                    const myBranch = isIrconUser ? 'IRCON' : 'RAHEE';
+                    
+                    // Show ONLY user's own main company folder (RAHEE or IRCON) and its subfolders
+                    filteredFolders = folders.filter(f => {
+                      const fName = (f.name || '').toUpperCase();
+                      const parentName = (f.parent_folder_name || '').toUpperCase();
+                      if (fName === myBranch || parentName === myBranch) return true;
+                      return false;
+                    });
+                  }
+
+                  const allFormattedFolders = getFormattedFolderList(filteredFolders);
+                  const matchingFolders = allFormattedFolders.filter(f => {
+                    const fNameLower = (f.name || '').toLowerCase();
+                    if (documentType === 'CAD') {
+                      return fNameLower.includes('cad') || fNameLower.includes('engineering') || fNameLower.includes('project') || fNameLower.includes('drawing') || fNameLower.includes('spec');
+                    } else if (documentType === 'PDF') {
+                      return fNameLower.includes('pdf') || fNameLower.includes('doc') || fNameLower.includes('report') || fNameLower.includes('audit');
+                    } else if (documentType === 'WORD') {
+                      return fNameLower.includes('word') || fNameLower.includes('doc') || fNameLower.includes('contract') || fNameLower.includes('draft');
+                    } else if (documentType === 'EXCEL') {
+                      return fNameLower.includes('excel') || fNameLower.includes('sheet') || fNameLower.includes('finance') || fNameLower.includes('audit');
+                    } else if (documentType === 'POWERPOINT') {
+                      return fNameLower.includes('powerpoint') || fNameLower.includes('ppt') || fNameLower.includes('presentation');
+                    } else if (documentType === 'IMAGE') {
+                      return fNameLower.includes('image') || fNameLower.includes('photo') || fNameLower.includes('site');
+                    }
+                    return true;
+                  });
+
+                  const otherFolders = allFormattedFolders.filter(f => !matchingFolders.some(m => m.id === f.id));
+
+                  return (
+                    <>
+                      {matchingFolders.length > 0 && (
+                        <optgroup label={`🎯 Recommended Storage Folders for ${documentType} Files`}>
+                          {matchingFolders.map(f => (
+                            <option key={f.id} value={f.id}>
+                              {f.displayName}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {otherFolders.length > 0 && (
+                        <optgroup label="📁 Storage Folders">
+                          {otherFolders.map(f => (
+                            <option key={f.id} value={f.id}>
+                              {f.displayName}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </>
+                  );
+                })()}
               </select>
             </div>
 
@@ -357,11 +436,19 @@ export default function UploadDocument() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <Upload className="w-10 h-10 text-slate-400 mx-auto" />
+                    <Upload className="w-10 h-10 text-blue-500 mx-auto" />
                     <p className="font-bold text-slate-800 text-sm">Click to select or drag & drop document file here</p>
-                    <p className="text-xs text-slate-500">
-                      Supported Formats: <strong>PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), Images</strong>
-                    </p>
+                    <div className="inline-block px-3 py-1 bg-blue-100/70 border border-blue-200 text-blue-800 rounded-lg text-xs font-semibold">
+                      🎯 File Dialog Filtered For: <strong>{
+                        documentType === 'PDF' ? 'PDF Documents (.pdf)' :
+                        documentType === 'WORD' ? 'Microsoft Word (.doc, .docx)' :
+                        documentType === 'EXCEL' ? 'Microsoft Excel (.xls, .xlsx)' :
+                        documentType === 'POWERPOINT' ? 'Microsoft PowerPoint (.ppt, .pptx)' :
+                        documentType === 'IMAGE' ? 'Images (.jpg, .png, .webp, .svg)' :
+                        documentType === 'CAD' ? 'CAD Drawings & 3D Models (.dwg, .dxf, .stl, .obj, .step, .stp, .iges)' :
+                        'All Supported Formats'
+                      }</strong>
+                    </div>
                     <p className="text-[11px] text-slate-400 italic">Max file size: 25 MB. Executables strictly prohibited.</p>
                   </div>
                 )}
@@ -390,6 +477,72 @@ export default function UploadDocument() {
         </form>
 
       </div>
+
+      {/* Live Preview of Existing Documents in System matching selected Document Type */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center space-x-2">
+            <Layers className="w-5 h-5 text-blue-600" />
+            <h2 className="text-sm font-bold text-slate-900">
+              Existing {documentType} Documents in Repository ({existingDocs.length})
+            </h2>
+          </div>
+          <span className="text-[11px] bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg font-semibold border border-blue-100">
+            Filtered for: <strong>{documentType}</strong>
+          </span>
+        </div>
+
+        {loadingExistingDocs ? (
+          <div className="py-6 text-center text-xs text-slate-400">Loading existing {documentType} documents...</div>
+        ) : existingDocs.length === 0 ? (
+          <div className="py-6 text-center text-xs text-slate-400 italic bg-slate-50 rounded-xl border border-dashed border-slate-200">
+            No {documentType} documents uploaded yet in your organization repository.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500 mb-3">
+              Below are the current {documentType} files stored in your repository. Check to avoid duplicate uploads:
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
+              {existingDocs.slice(0, 6).map(doc => (
+                <Link
+                  key={doc.id}
+                  to={`/documents/${doc.id}`}
+                  target="_blank"
+                  className="p-3 bg-slate-50 hover:bg-blue-50/60 rounded-xl border border-slate-200 flex items-center justify-between transition group"
+                >
+                  <div className="min-w-0 flex-1 pr-2">
+                    <div className="flex items-center space-x-1.5">
+                      <p className="text-xs font-bold text-slate-800 truncate group-hover:text-blue-600 transition">
+                        {doc.title}
+                      </p>
+                      <ExternalLink className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
+                    </div>
+                    <p className="text-[11px] text-slate-500 flex items-center space-x-2 mt-1">
+                      <span className="font-semibold text-slate-600">{doc.current_version_number || 'V1'}</span>
+                      <span>&bull;</span>
+                      <span className="truncate">{doc.folder_name || '📁 Main Repository'}</span>
+                    </p>
+                  </div>
+                  <StatusBadge status={doc.status} />
+                </Link>
+              ))}
+            </div>
+            {existingDocs.length > 6 && (
+              <div className="text-center pt-2 border-t border-slate-100">
+                <Link
+                  to={`/documents?document_type=${documentType}`}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-800 transition inline-flex items-center space-x-1"
+                >
+                  <span>View all {existingDocs.length} {documentType} documents in Document Repository</span>
+                  <ExternalLink className="w-3 h-3" />
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }

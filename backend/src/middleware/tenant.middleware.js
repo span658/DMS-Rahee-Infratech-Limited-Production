@@ -1,7 +1,15 @@
+const { MULTI_TENANT_ISOLATION_ENABLED } = require('../config/workflow.config');
+
 // Enforces organization-level tenant isolation
 function enforceTenantIsolation(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ success: false, message: 'Authentication required.' });
+  }
+
+  // Bypass multi-tenant isolation when feature flag is disabled
+  if (!MULTI_TENANT_ISOLATION_ENABLED) {
+    req.tenantOrgId = req.user.organization_id || null;
+    return next();
   }
 
   // Super Admin can access multi-tenant resources
@@ -24,7 +32,7 @@ function enforceTenantIsolation(req, res, next) {
 
 // Helper to verify resource ownership against tenant
 function verifyResourceTenant(resourceOrgId, req, res) {
-  if (req.user.is_super_admin) return true;
+  if (!MULTI_TENANT_ISOLATION_ENABLED || req.user.is_super_admin) return true;
   if (!resourceOrgId || parseInt(resourceOrgId) !== parseInt(req.user.organization_id)) {
     res.status(403).json({ success: false, message: 'Access Denied: You do not have permission to access resources belonging to another organization.' });
     return false;

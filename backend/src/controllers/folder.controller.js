@@ -1,5 +1,51 @@
 const db = require('../config/db');
 const { logAudit } = require('../services/audit.service');
+const { MULTI_TENANT_ISOLATION_ENABLED, ONLY_SUPER_ADMIN_CAN_DELETE, ADMIN_FOLDER_CREATION_ENABLED } = require('../config/workflow.config');
+
+// Recursive helper to get all subfolder IDs under a given parent folder ID
+async function getAllSubfolderIds(folderId) {
+  const subfolderIds = [];
+  const queue = [folderId];
+
+  while (queue.length > 0) {
+    const currentParentId = queue.shift();
+    const children = await db.query('SELECT id FROM folders WHERE parent_id = ?', [currentParentId]);
+    for (const child of children) {
+      subfolderIds.push(child.id);
+      queue.push(child.id);
+    }
+  }
+
+  return subfolderIds;
+}
+
+// Check if a folder is a descendant of a target branch (e.g. RAHEE, IRCON, Bikramshila)
+async function isFolderUnderBranch(folderId, branchName) {
+  if (!folderId) return false;
+  let currentId = folderId;
+  const visited = new Set();
+
+  while (currentId && !visited.has(currentId)) {
+    visited.add(currentId);
+    const rows = await db.query('SELECT id, name, parent_id FROM folders WHERE id = ?', [currentId]);
+    if (!rows || rows.length === 0) break;
+    const folder = rows[0];
+    if (folder.name.toUpperCase() === branchName.toUpperCase()) {
+      return true;
+    }
+    currentId = folder.parent_id;
+  }
+  return false;
+}
+
+// Check if a folder is the Bikramshila root folder
+async function isBikramshilaRoot(folderId) {
+  if (!folderId) return true;
+  const rows = await db.query('SELECT id, name, parent_id FROM folders WHERE id = ?', [folderId]);
+  if (!rows || rows.length === 0) return true;
+  const folder = rows[0];
+  return folder.parent_id === null || ['BIKRAMSHILA', 'BKS'].includes(folder.name.toUpperCase());
+}
 
 // Get all folders for the authenticated user's organization scope
 async function getFolders(req, res) {
@@ -14,7 +60,7 @@ async function getFolders(req, res) {
     let params = [];
 
     const isExecAdmin = req.user.role_name === 'RAHEE_EXEC_ADMIN' || req.user.role_id === 3;
-    if (!req.user.is_super_admin && !isExecAdmin) {
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin && !isExecAdmin) {
       sql += ' WHERE f.organization_id = ?';
       params.push(req.user.organization_id);
     } else if (req.query.organization_id) {
@@ -34,46 +80,88 @@ async function getFolders(req, res) {
 // Create new folder for tenant organization (Company 1 / Company 2 Admin)
 async function createFolder(req, res) {
   try {
-    const { name, description, parent_id } = req.body;
+    const { name, description, parent_id, is_operational } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, message: 'Folder name is required.' });
     }
 
-    // STRICT RULE: Folder Creation is EXCLUSIVELY PERMITTED for Company 1 Admin (Rahul Dey / Rajib Ghosh), Company 2 Admin (Shardu Kumar Rastogi), & Super Admin.
-    const isCompany1Admin = [2, 3].includes(req.user.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN'].includes(req.user.role_name);
-    const isCompany2Admin = req.user.role_id === 8 || req.user.role_name === 'IRCON_ADMIN_REVIEWER';
+    const userEmail = req.user.email?.toLowerCase() || '';
+    const isRahulDeyAdmin = userEmail === 'rahul.d@rahee.com' || [2, 3].includes(req.user.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN'].includes(req.user.role_name);
+    const isOmJhaAdmin = userEmail.startsWith('om.jha@') || req.user.role_id === 8 || req.user.role_name === 'IRCON_ADMIN_REVIEWER' || req.user.role_name === 'IRCON_ADMIN';
+
     const isSuperAdmin = req.user.is_super_admin || req.user.role_id === 1 || req.user.role_name === 'SUPER_ADMIN';
 
-    if (!isCompany1Admin && !isCompany2Admin && !isSuperAdmin) {
+    if (!isRahulDeyAdmin && !isOmJhaAdmin && !isSuperAdmin) {
       return res.status(403).json({
         success: false,
-        message: 'Forbidden: Folder creation is strictly restricted to Company Admins ONLY (Company 1 Admin & Company 2 Admin).'
+        message: 'Forbidden: Folder creation is strictly restricted to designated Admins (Rahul Dey for Rahee, Om Jha for Ircon, and Super Admin).'
       });
     }
 
-    const orgId = req.user.organization_id || 1; // Default to Company 1 if superadmin
-    const parentId = parent_id ? parseInt(parent_id) : null;
+    const orgId = req.user.organization_id || 1;
+    let parentId = parent_id ? parseInt(parent_id) : null;
 
-    if (parentId) {
-      const parentCheck = await db.query('SELECT id FROM folders WHERE id = ? AND organization_id = ?', [parentId, orgId]);
-      if (!parentCheck || parentCheck.length === 0) {
-        return res.status(400).json({ success: false, message: 'Selected parent folder does not exist in your organization.' });
+    if (isSuperAdmin && !parentId) {
+      const bksFolder = await db.query("SELECT id FROM folders WHERE UPPER(name) = 'BIKRAMSHILA' OR UPPER(name) = 'BKS' LIMIT 1");
+      if (bksFolder && bksFolder.length > 0) {
+        parentId = bksFolder[0].id;
       }
     }
 
-    // Check if folder name already exists under the same parent directory
+    let finalOperationalFlag = is_operational ? 1 : 0;
+
+    if (parentId) {
+      const parentCheck = MULTI_TENANT_ISOLATION_ENABLED
+        ? await db.query('SELECT id, is_operational FROM folders WHERE id = ? AND organization_id = ?', [parentId, orgId])
+        : await db.query('SELECT id, is_operational FROM folders WHERE id = ?', [parentId]);
+
+      if (!parentCheck || parentCheck.length === 0) {
+        return res.status(400).json({ success: false, message: 'Selected parent folder does not exist.' });
+      }
+      // Automatically inherit Operational non-archivable status from parent folder
+      if (parentCheck[0].is_operational === 1 || parentCheck[0].is_operational === true) {
+        finalOperationalFlag = 1;
+      }
+    }
+
+    // ENFORCE SPECIFIC FOLDER CREATION BOUNDARIES:
+    // 1. Rahul Dey / Somnath Mondal (Rahee Admin/Uploader) can create folders under Bikramshila root or RAHEE branch
+    // 2. Om Jha (Ircon Admin) can create folders under Bikramshila root or IRCON branch
+    // 3. Super Admin (Rajib Ghosh) can create folders under Bikramshila root or any branch
+    if (!isSuperAdmin) {
+      const isRoot = parentId ? await isBikramshilaRoot(parentId) : true;
+      if (isRahulDeyAdmin) {
+        const isUnderRahee = parentId ? (isRoot || await isFolderUnderBranch(parentId, 'RAHEE')) : true;
+        const isUnderIrcon = parentId ? await isFolderUnderBranch(parentId, 'IRCON') : false;
+        if (!isUnderRahee || isUnderIrcon) {
+          return res.status(403).json({
+            success: false,
+            message: 'Forbidden: As Rahee Admin, folder creation must be under Bikramshila root or the RAHEE directory branch.'
+          });
+        }
+      } else if (isOmJhaAdmin) {
+        const isUnderIrcon = parentId ? (isRoot || await isFolderUnderBranch(parentId, 'IRCON')) : true;
+        const isUnderRahee = parentId ? await isFolderUnderBranch(parentId, 'RAHEE') : false;
+        if (!isUnderIrcon || isUnderRahee) {
+          return res.status(403).json({
+            success: false,
+            message: 'Forbidden: As Ircon Admin, folder creation must be under Bikramshila root or the IRCON directory branch.'
+          });
+        }
+      }
+    }
+
+    // Check duplicate folder name under same parent
     let existing;
     if (parentId) {
-      existing = await db.query(
-        'SELECT id FROM folders WHERE organization_id = ? AND parent_id = ? AND LOWER(name) = LOWER(?)',
-        [orgId, parentId, name.trim()]
-      );
+      existing = MULTI_TENANT_ISOLATION_ENABLED
+        ? await db.query('SELECT id FROM folders WHERE organization_id = ? AND parent_id = ? AND LOWER(name) = LOWER(?)', [orgId, parentId, name.trim()])
+        : await db.query('SELECT id FROM folders WHERE parent_id = ? AND LOWER(name) = LOWER(?)', [parentId, name.trim()]);
     } else {
-      existing = await db.query(
-        'SELECT id FROM folders WHERE organization_id = ? AND parent_id IS NULL AND LOWER(name) = LOWER(?)',
-        [orgId, name.trim()]
-      );
+      existing = MULTI_TENANT_ISOLATION_ENABLED
+        ? await db.query('SELECT id FROM folders WHERE organization_id = ? AND parent_id IS NULL AND LOWER(name) = LOWER(?)', [orgId, name.trim()])
+        : await db.query('SELECT id FROM folders WHERE parent_id IS NULL AND LOWER(name) = LOWER(?)', [name.trim()]);
     }
 
     if (existing && existing.length > 0) {
@@ -81,17 +169,44 @@ async function createFolder(req, res) {
     }
 
     const result = await db.query(
-      'INSERT INTO folders (organization_id, name, description, created_by, parent_id) VALUES (?, ?, ?, ?, ?)',
-      [orgId, name.trim(), (description || '').trim(), req.user.id, parentId]
+      'INSERT INTO folders (organization_id, name, description, created_by, parent_id, is_operational) VALUES (?, ?, ?, ?, ?, ?)',
+      [orgId, name.trim(), (description || '').trim(), req.user.id, parentId, finalOperationalFlag]
     );
 
     const folderId = result.insertId || result.id;
+
+    // Inherit access control permission rules from parent folder if subfolder
+    if (parentId) {
+      const parentPerms = await db.query('SELECT role_id, user_id, permission_level FROM folder_permissions WHERE folder_id = ?', [parentId]);
+      for (const p of parentPerms) {
+        await db.query(
+          'INSERT INTO folder_permissions (folder_id, role_id, user_id, permission_level) VALUES (?, ?, ?, ?)',
+          [folderId, p.role_id, p.user_id, p.permission_level]
+        );
+      }
+    }
+
+    // Save custom initial permission rules if passed by Admin during creation
+    if (Array.isArray(req.body.permissions)) {
+      for (const p of req.body.permissions) {
+        const roleId = p.role_id ? parseInt(p.role_id) : null;
+        const userId = p.user_id ? parseInt(p.user_id) : null;
+        const level = p.permission_level || 'FULL_CONTROL';
+
+        if (roleId || userId) {
+          await db.query(
+            'INSERT INTO folder_permissions (folder_id, role_id, user_id, permission_level) VALUES (?, ?, ?, ?)',
+            [folderId, roleId, userId, level]
+          );
+        }
+      }
+    }
 
     await logAudit({
       organization_id: orgId,
       user_id: req.user.id,
       action: 'FOLDER_CREATED',
-      comment: `Created new document folder '${name.trim()}' (ID: ${folderId}${parentId ? `, Parent ID: ${parentId}` : ''}).`,
+      comment: `Created new document folder '${name.trim()}' (ID: ${folderId}${parentId ? `, Parent ID: ${parentId}` : ''}, Operational: ${finalOperationalFlag ? 'Yes' : 'No'}).`,
       req
     });
 
@@ -104,8 +219,160 @@ async function createFolder(req, res) {
         name: name.trim(),
         description: (description || '').trim(),
         created_by: req.user.id,
-        parent_id: parentId
+        parent_id: parentId,
+        is_operational: finalOperationalFlag
       }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+// Update folder details & operational non-archival setting (Admin ONLY)
+async function updateFolder(req, res) {
+  try {
+    const { id } = req.params;
+    const { name, description, parent_id, is_operational } = req.body;
+
+    const folders = await db.query('SELECT * FROM folders WHERE id = ?', [id]);
+    const folder = folders[0];
+    if (!folder) {
+      return res.status(404).json({ success: false, message: 'Folder not found.' });
+    }
+
+    const isCompany1Admin = [2, 3].includes(req.user.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN'].includes(req.user.role_name);
+    const isCompany2Admin = req.user.role_id === 8 || req.user.role_name === 'IRCON_ADMIN_REVIEWER';
+    const isSuperAdmin = req.user.is_super_admin || req.user.role_id === 1;
+
+    if (!isCompany1Admin && !isCompany2Admin && !isSuperAdmin) {
+      return res.status(403).json({ success: false, message: 'Forbidden: Folder configuration is restricted to Company Admins.' });
+    }
+
+    const newName = name && name.trim() ? name.trim() : folder.name;
+    const newDesc = description !== undefined ? description.trim() : folder.description;
+    const newParentId = parent_id !== undefined ? (parent_id ? parseInt(parent_id) : null) : folder.parent_id;
+    const newOperational = is_operational !== undefined ? (is_operational ? 1 : 0) : folder.is_operational;
+
+    await db.query(
+      'UPDATE folders SET name = ?, description = ?, parent_id = ?, is_operational = ? WHERE id = ?',
+      [newName, newDesc, newParentId, newOperational, id]
+    );
+
+    await logAudit({
+      organization_id: folder.organization_id,
+      user_id: req.user.id,
+      action: 'FOLDER_UPDATED',
+      comment: `Updated folder '${newName}' (ID: ${id}). Operational Folder: ${newOperational ? 'Enabled (Non-Archivable)' : 'Disabled'}.`,
+      req
+    });
+
+    return res.json({
+      success: true,
+      message: `Folder '${newName}' updated successfully.`,
+      folder: {
+        id: parseInt(id),
+        organization_id: folder.organization_id,
+        name: newName,
+        description: newDesc,
+        parent_id: newParentId,
+        is_operational: newOperational
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+// Get Access Control Permissions for a folder & subfolders
+async function getFolderPermissions(req, res) {
+  try {
+    const { id } = req.params;
+
+    const folders = await db.query('SELECT * FROM folders WHERE id = ?', [id]);
+    const folder = folders[0];
+    if (!folder) {
+      return res.status(404).json({ success: false, message: 'Folder not found.' });
+    }
+
+    const permissions = await db.query(
+      `SELECT fp.*, r.name as role_name, r.description as role_description, u.name as user_name, u.email as user_email
+       FROM folder_permissions fp
+       LEFT JOIN roles r ON fp.role_id = r.id
+       LEFT JOIN users u ON fp.user_id = u.id
+       WHERE fp.folder_id = ?
+       ORDER BY fp.id ASC`,
+      [id]
+    );
+
+    return res.json({
+      success: true,
+      folder,
+      permissions
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+// Set/Update Access Control Permissions for a folder and optionally all subfolders (Admin ONLY)
+async function updateFolderPermissions(req, res) {
+  try {
+    const { id } = req.params;
+    const { permissions, apply_to_subfolders } = req.body; // permissions: Array of { role_id, user_id, permission_level }
+
+    const folders = await db.query('SELECT * FROM folders WHERE id = ?', [id]);
+    const folder = folders[0];
+    if (!folder) {
+      return res.status(404).json({ success: false, message: 'Folder not found.' });
+    }
+
+    const isCompany1Admin = [2, 3].includes(req.user.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN'].includes(req.user.role_name);
+    const isCompany2Admin = req.user.role_id === 8 || req.user.role_name === 'IRCON_ADMIN_REVIEWER';
+    const isSuperAdmin = req.user.is_super_admin || req.user.role_id === 1;
+
+    if (!isCompany1Admin && !isCompany2Admin && !isSuperAdmin) {
+      return res.status(403).json({ success: false, message: 'Forbidden: Access control configuration is restricted to Company Admins.' });
+    }
+
+    // Determine target folder IDs (single folder or recursive subfolders)
+    let targetFolderIds = [parseInt(id)];
+    if (apply_to_subfolders) {
+      const subfolderIds = await getAllSubfolderIds(parseInt(id));
+      targetFolderIds = targetFolderIds.concat(subfolderIds);
+    }
+
+    for (const fId of targetFolderIds) {
+      // Clear existing permission entries for target folder
+      await db.query('DELETE FROM folder_permissions WHERE folder_id = ?', [fId]);
+
+      // Insert new permission rules
+      if (Array.isArray(permissions)) {
+        for (const p of permissions) {
+          const roleId = p.role_id ? parseInt(p.role_id) : null;
+          const userId = p.user_id ? parseInt(p.user_id) : null;
+          const level = p.permission_level || 'FULL_CONTROL';
+
+          if (roleId || userId) {
+            await db.query(
+              'INSERT INTO folder_permissions (folder_id, role_id, user_id, permission_level) VALUES (?, ?, ?, ?)',
+              [fId, roleId, userId, level]
+            );
+          }
+        }
+      }
+    }
+
+    await logAudit({
+      organization_id: folder.organization_id,
+      user_id: req.user.id,
+      action: 'FOLDER_PERMISSIONS_UPDATED',
+      comment: `Updated access control permissions for folder '${folder.name}' (ID: ${id})${apply_to_subfolders ? ` and ${targetFolderIds.length - 1} subfolders` : ''}.`,
+      req
+    });
+
+    return res.json({
+      success: true,
+      message: `Access control permissions updated successfully for '${folder.name}'${apply_to_subfolders ? ` and its subfolders.` : '.'}`
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -123,17 +390,18 @@ async function deleteFolder(req, res) {
       return res.status(404).json({ success: false, message: 'Folder not found.' });
     }
 
-    // Role permission check
-    const isCompany1Admin = [2, 3].includes(req.user.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN'].includes(req.user.role_name);
-    const isCompany2Admin = req.user.role_id === 8 || req.user.role_name === 'IRCON_ADMIN_REVIEWER';
-    const isSuperAdmin = req.user.is_super_admin;
-
-    if (!isCompany1Admin && !isCompany2Admin && !isSuperAdmin) {
-      return res.status(403).json({ success: false, message: 'Forbidden: Folder management is restricted to Company Admins.' });
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({
+        success: false,
+        message: 'Forbidden: Under system security policy, ONLY the Super Admin is authorized to delete folders.'
+      });
     }
 
     // Unlink documents from folder
     await db.query('UPDATE documents SET folder_id = NULL WHERE folder_id = ?', [id]);
+
+    // Delete folder permissions
+    await db.query('DELETE FROM folder_permissions WHERE folder_id = ?', [id]);
 
     // Delete folder
     await db.query('DELETE FROM folders WHERE id = ?', [id]);
@@ -155,5 +423,8 @@ async function deleteFolder(req, res) {
 module.exports = {
   getFolders,
   createFolder,
+  updateFolder,
+  getFolderPermissions,
+  updateFolderPermissions,
   deleteFolder
 };

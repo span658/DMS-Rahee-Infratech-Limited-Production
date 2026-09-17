@@ -38,4 +38,16 @@ router.post('/:id/versions', requirePermission('edit'), handleUpload(upload.sing
 // Workflow Review & Approval Action
 router.post('/:id/review', requirePermission('approve_reject', 'final_approve'), reviewController.processReviewAction);
 
+// Archival Policy Manual / Scheduled Trigger (Admin / System)
+router.post('/run-archival-policy', documentController.triggerArchivalPolicy);
+
+// Manual Document Archival (Super Admin & Company Admins)
+router.post('/:id/archive', documentController.archiveDocument);
+
+// Document Restoration / Retention Recovery from Archive
+router.post('/:id/restore', documentController.restoreDocument);
+
+// Document Deletion (Super Admin ONLY)
+router.delete('/:id', documentController.deleteDocument);
+
 module.exports = router;

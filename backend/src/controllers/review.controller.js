@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const { sendNotification } = require('../services/notification.service');
 const { logAudit } = require('../services/audit.service');
+const { MULTI_TENANT_ISOLATION_ENABLED } = require('../config/workflow.config');
 
 async function processReviewAction(req, res) {
   try {
@@ -22,14 +23,57 @@ async function processReviewAction(req, res) {
       return res.status(404).json({ success: false, message: 'Document not found.' });
     }
 
-    // Tenant Isolation Check: 100% Strictly Restricted per Organization
+    // Tenant Isolation Check
     const isExecAdmin = req.user.role_name === 'RAHEE_EXEC_ADMIN' || req.user.role_id === 3;
-    if (!req.user.is_super_admin && !isExecAdmin && parseInt(doc.organization_id) !== parseInt(req.user.organization_id)) {
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin && !isExecAdmin && parseInt(doc.organization_id) !== parseInt(req.user.organization_id)) {
       return res.status(403).json({ success: false, message: 'Forbidden: Access denied under strict tenant isolation. Cannot view or review documents belonging to another organization.' });
     }
 
     if (doc.is_locked === 1 || doc.status === 'FINAL_APPROVED') {
-      return res.status(400).json({ success: false, message: 'This document is final approved and locked.' });
+      if (action === 'REJECTED') {
+        const reviewerRoleTag = req.user.role_name || 'REVIEWER';
+        await db.query(
+          `INSERT INTO document_reviews (document_id, document_version_id, organization_id, reviewer_id, reviewer_role, action, comments)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [doc.id, doc.current_version_id, doc.organization_id, req.user.id, reviewerRoleTag, action, comments ? comments.trim() : 'Revision requested on Final Approved document']
+        );
+
+        await db.query('UPDATE documents SET status = "REJECTED", is_locked = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [doc.id]);
+
+        // Send notification to Uploader & Super Admin
+        const targetUsers = await db.query(
+          `SELECT u.id, u.name, u.email FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE (u.organization_id = ? OR r.name = 'SUPER_ADMIN') AND u.status = 'ACTIVE'`,
+          [doc.organization_id]
+        );
+
+        for (const usr of targetUsers) {
+          const isUploader = usr.id === doc.uploaded_by;
+          await sendNotification({
+            recipientId: usr.id,
+            senderId: req.user.id,
+            documentId: doc.id,
+            organizationId: doc.organization_id,
+            title: isUploader ? `⚠️ Revision Requested for Approved Document ${doc.title}` : `⚠️ Revision Requested: ${doc.title}`,
+            message: `${req.user.name} requested changes on Final Approved document "${doc.title}". Required Updates: ${comments.trim()}`,
+            type: 'DOCUMENT_REJECTED_STAGE_1',
+            emailDetails: { documentTitle: doc.title, documentVersion: doc.current_version_number }
+          });
+        }
+
+        await logAudit({
+          organization_id: doc.organization_id,
+          user_id: req.user.id,
+          action: 'DOCUMENT_REJECTED',
+          document_id: doc.id,
+          version: doc.current_version_number,
+          comment: `Revision requested on Final Approved document by ${req.user.name}. Comments: ${comments}`,
+          req
+        });
+
+        return res.json({ success: true, message: `Revision requested on Final Approved document. Status set to REJECTED for major version update.`, status: 'REJECTED' });
+      } else {
+        return res.status(400).json({ success: false, message: 'This document is already final approved and locked. To request changes, select REJECT with required change notes.' });
+      }
     }
 
     const versions = await db.query('SELECT * FROM document_versions WHERE id = ?', [doc.current_version_id]);

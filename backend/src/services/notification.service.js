@@ -7,8 +7,24 @@ function setSocketIO(socketServer) {
   io = socketServer;
 }
 
+const EXCLUDED_NOTIF_EMAILS = [
+  'manish.p@rahee.com',
+  'ayush.k@rahee.com',
+  'manoj.g@rahee.com',
+  'arunabha.p@rahee.com'
+];
+
 async function sendNotification({ recipientId, senderId, documentId, title, message, type, organizationId, emailDetails }) {
   try {
+    // Check if recipient is one of the 4 notification-excluded view-only users
+    const recipientUsers = await db.query('SELECT name, email FROM users WHERE id = ?', [recipientId]);
+    const recipient = recipientUsers[0];
+
+    if (recipient && recipient.email && EXCLUDED_NOTIF_EMAILS.includes(recipient.email.toLowerCase())) {
+      // Excluded view-only user: suppress all in-app & email notifications completely
+      return null;
+    }
+
     // 1. Save In-App Notification in DB
     const res = await db.query(
       `INSERT INTO notifications (organization_id, recipient_id, sender_id, document_id, title, message, type, is_read)

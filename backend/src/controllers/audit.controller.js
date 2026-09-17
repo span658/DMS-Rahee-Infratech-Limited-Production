@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { MULTI_TENANT_ISOLATION_ENABLED } = require('../config/workflow.config');
 
 async function getAuditLogs(req, res) {
   try {
@@ -11,7 +12,7 @@ async function getAuditLogs(req, res) {
     let whereClauses = [];
 
     // Tenant Isolation
-    if (!req.user.is_super_admin) {
+    if (MULTI_TENANT_ISOLATION_ENABLED && !req.user.is_super_admin) {
       whereClauses.push('a.organization_id = ?');
       params.push(req.user.organization_id);
     } else if (req.query.organization_id) {
