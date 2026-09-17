@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Enterprise Document Management System (EDMS) - Master Database Schema & Seed
--- Target Engine: MySQL 5.7+ / 8.0+ / SQLite 3.x
+-- Target Engine: MySQL 5.7+ / 8.0+
 -- Scope: Rahee Infratech Limited (Company 1) & Ircon International Limited (Company 2)
 -- Policy: Bikramshila Directory Hierarchy & Bikramshila Manual Document Archival Policy
 -- ============================================================================

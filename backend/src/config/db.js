@@ -1,25 +1,18 @@
-const sqlite3 = require('sqlite3').verbose();
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
-const path = require('path');
-const fs = require('fs');
 
-let dbDriver = 'sqlite'; // 'mysql' or 'sqlite'
-let sqliteDb = null;
 let mysqlPool = null;
 
 // Initialize Database connection and tables
 async function initDatabase() {
   const host = process.env.DB_HOST || '127.0.0.1';
-  const port = process.env.DB_PORT || 3306;
+  const port = parseInt(process.env.DB_PORT || '3306', 10);
   const user = process.env.DB_USER || 'root';
   const password = process.env.DB_PASSWORD || 'root';
   const dbName = process.env.DB_NAME || 'enterprise_dms';
 
-  let mysqlConnected = false;
-
   try {
-    // Try connecting to MySQL first
+    // Ensure database exists
     const rootConnection = await mysql.createConnection({ host, port, user, password });
     await rootConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\`;`);
     await rootConnection.end();
@@ -40,23 +33,11 @@ async function initDatabase() {
     // Test query
     const [rows] = await mysqlPool.query('SELECT 1 + 1 AS result');
     if (rows) {
-      dbDriver = 'mysql';
-      mysqlConnected = true;
       console.log('Successfully connected to MySQL database engine:', dbName);
     }
   } catch (err) {
-    console.warn('MySQL connection skipped or failed (' + err.message + '). Falling back to embedded SQLite database engine.');
-  }
-
-  if (!mysqlConnected) {
-    dbDriver = 'sqlite';
-    const dbDir = path.join(__dirname, '../../data');
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-    const dbPath = path.join(dbDir, 'enterprise_dms.sqlite');
-    sqliteDb = new sqlite3.Database(dbPath);
-    console.log('Successfully initialized SQLite database engine at:', dbPath);
+    console.error('MySQL connection failed:', err.message);
+    throw new Error(`Fatal: Could not connect to MySQL database '${dbName}' on ${host}:${port}. Error: ${err.message}`);
   }
 
   await createTables();
@@ -102,44 +83,20 @@ async function seedBksFolders() {
   }
 }
 
-// Universal Query Helper
+// Universal Query Helper (MySQL-only)
 async function query(sql, params = []) {
-  if (dbDriver === 'mysql') {
-    // Format SQL query parameters for MySQL
-    const [results] = await mysqlPool.query(sql, params);
-    return results;
-  } else {
-    // Format SQL for SQLite (replace `id AUTO_INCREMENT` logic if needed, SQLite uses standard SQL)
-    return new Promise((resolve, reject) => {
-      // Normalize MySQL AUTO_INCREMENT & DATETIME types for SQLite compatibility
-      let normalizedSql = sql
-        .replace(/AUTO_INCREMENT/gi, 'AUTOINCREMENT')
-        .replace(/ENGINE=InnoDB/gi, '')
-        .replace(/DATETIME/gi, 'TEXT')
-        .replace(/TINYINT/gi, 'INTEGER');
-
-      const isSelect = normalizedSql.trim().toUpperCase().startsWith('SELECT') || normalizedSql.trim().toUpperCase().startsWith('PRAGMA');
-
-      if (isSelect) {
-        sqliteDb.all(normalizedSql, params, (err, rows) => {
-          if (err) return reject(err);
-          resolve(rows);
-        });
-      } else {
-        sqliteDb.run(normalizedSql, params, function (err) {
-          if (err) return reject(err);
-          resolve({ insertId: this.lastID, affectedRows: this.changes });
-        });
-      }
-    });
+  if (!mysqlPool) {
+    throw new Error('Database pool has not been initialized. Please call initDatabase() first.');
   }
+  const [results] = await mysqlPool.query(sql, params);
+  return results;
 }
 
 async function createTables() {
   // Organizations
   await query(`
     CREATE TABLE IF NOT EXISTS organizations (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       name VARCHAR(255) NOT NULL,
       code VARCHAR(50) NOT NULL UNIQUE,
       status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
@@ -150,7 +107,7 @@ async function createTables() {
   // Roles
   await query(`
     CREATE TABLE IF NOT EXISTS roles (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       name VARCHAR(100) NOT NULL UNIQUE,
       description TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -160,7 +117,7 @@ async function createTables() {
   // Permissions
   await query(`
     CREATE TABLE IF NOT EXISTS permissions (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       code VARCHAR(100) NOT NULL UNIQUE,
       description TEXT
     );
@@ -178,7 +135,7 @@ async function createTables() {
   // Users
   await query(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       organization_id INTEGER,
       name VARCHAR(255) NOT NULL,
       email VARCHAR(255) NOT NULL UNIQUE,
@@ -195,7 +152,7 @@ async function createTables() {
   // Documents
   await query(`
     CREATE TABLE IF NOT EXISTS documents (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       organization_id INTEGER NOT NULL,
       uploaded_by INTEGER NOT NULL,
       title VARCHAR(255) NOT NULL,
@@ -219,7 +176,7 @@ async function createTables() {
   // Document Versions
   await query(`
     CREATE TABLE IF NOT EXISTS document_versions (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       document_id INTEGER NOT NULL,
       organization_id INTEGER NOT NULL,
       version_number VARCHAR(50) NOT NULL,
@@ -239,7 +196,7 @@ async function createTables() {
   // Document Reviews
   await query(`
     CREATE TABLE IF NOT EXISTS document_reviews (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       document_id INTEGER NOT NULL,
       document_version_id INTEGER NOT NULL,
       organization_id INTEGER NOT NULL,
@@ -254,7 +211,7 @@ async function createTables() {
   // Notifications
   await query(`
     CREATE TABLE IF NOT EXISTS notifications (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       organization_id INTEGER,
       recipient_id INTEGER NOT NULL,
       sender_id INTEGER,
@@ -270,7 +227,7 @@ async function createTables() {
   // Email Outbox / Activity Logs
   await query(`
     CREATE TABLE IF NOT EXISTS email_logs (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       recipient_email VARCHAR(255) NOT NULL,
       recipient_name VARCHAR(255),
       subject VARCHAR(255) NOT NULL,
@@ -285,7 +242,7 @@ async function createTables() {
   // Audit Logs
   await query(`
     CREATE TABLE IF NOT EXISTS audit_logs (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       organization_id INTEGER,
       user_id INTEGER,
       user_email VARCHAR(255),
@@ -303,7 +260,7 @@ async function createTables() {
   // Folders Table (Supports Parent-Child Sub-Folder Hierarchy)
   await query(`
     CREATE TABLE IF NOT EXISTS folders (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       organization_id INTEGER NOT NULL,
       name VARCHAR(255) NOT NULL,
       description TEXT,
@@ -331,7 +288,7 @@ async function createTables() {
   // Folder Permissions Table (Access Control for Folders & Subfolders)
   await query(`
     CREATE TABLE IF NOT EXISTS folder_permissions (
-      id INTEGER PRIMARY KEY ${dbDriver === 'mysql' ? 'AUTO_INCREMENT' : 'AUTOINCREMENT'},
+      id INTEGER PRIMARY KEY AUTO_INCREMENT,
       folder_id INTEGER NOT NULL,
       role_id INTEGER,
       user_id INTEGER,
@@ -634,5 +591,5 @@ async function seedInitialData() {
 module.exports = {
   initDatabase,
   query,
-  getDriver: () => dbDriver
+  getDriver: () => 'mysql'
 };

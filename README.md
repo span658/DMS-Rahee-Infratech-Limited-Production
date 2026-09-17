@@ -1,6 +1,6 @@
 # 🛡️ Enterprise Document Management System (DMS)
 
-A secure, multi-tenant Enterprise Document Management System built with **React.js**, **Node.js / Express.js**, **MySQL / SQLite**, **Socket.IO**, and **JWT Authentication**.
+A secure, multi-tenant Enterprise Document Management System built with **React.js**, **Node.js / Express.js**, **MySQL**, **Socket.IO**, and **JWT Authentication**.
 
 ---
 
@@ -95,7 +95,7 @@ npm install
 npm run start
 ```
 *The Express & Socket.IO server will start on `http://localhost:5000`.*
-*The database automatically creates and seeds tables (`enterprise_dms.sqlite` or MySQL).*
+*The database automatically connects to MySQL and creates/migrates required tables.*
 
 ### 2. Frontend Application Setup
 ```bash
