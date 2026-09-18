@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
-import api from '../services/api';
+import api, { SOCKET_URL } from '../services/api';
 
 const NotificationContext = createContext();
 
@@ -40,9 +40,8 @@ export const NotificationProvider = ({ children }) => {
 
     refreshNotifications();
 
-    // Initialize Socket.IO connection dynamically
-    const socketUrl = window.location.hostname === '127.0.0.1' ? 'http://127.0.0.1:5000' : 'http://localhost:5000';
-    const newSocket = io(socketUrl);
+    // Initialize Socket.IO connection using environment-configured URL
+    const newSocket = io(SOCKET_URL || undefined);
     setSocket(newSocket);
 
     newSocket.on('connect', () => {

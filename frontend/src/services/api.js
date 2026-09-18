@@ -1,8 +1,14 @@
 import axios from 'axios';
 
-const API_BASE_URL = window.location.hostname === '127.0.0.1' 
-  ? 'http://127.0.0.1:5000/api' 
-  : 'http://localhost:5000/api';
+// Backend API Base URL (configured via Vite environment variable with safe fallback)
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+
+// Socket.IO Server URL (configured via Vite env or derived from API_BASE_URL)
+export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (
+  import.meta.env.VITE_API_BASE_URL
+    ? import.meta.env.VITE_API_BASE_URL.replace(/\/api\/?$/, '')
+    : 'http://localhost:5000'
+);
 
 const api = axios.create({
   baseURL: API_BASE_URL,
