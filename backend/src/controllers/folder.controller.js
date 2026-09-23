@@ -126,27 +126,31 @@ async function createFolder(req, res) {
     }
 
     // ENFORCE SPECIFIC FOLDER CREATION BOUNDARIES:
-    // 1. Rahul Dey / Somnath Mondal (Rahee Admin/Uploader) can create folders under Bikramshila root or RAHEE branch
-    // 2. Om Jha (Ircon Admin) can create folders under Bikramshila root or IRCON branch
+    // 1. Rahul Dey / Rahee Admin can create folders strictly under RAHEE branch
+    // 2. Om Jha / Ircon Admin can create folders strictly under IRCON branch
     // 3. Super Admin (Rajib Ghosh) can create folders under Bikramshila root or any branch
     if (!isSuperAdmin) {
-      const isRoot = parentId ? await isBikramshilaRoot(parentId) : true;
+      if (!parentId) {
+        return res.status(400).json({
+          success: false,
+          message: 'A parent folder under your company branch must be selected.'
+        });
+      }
+
       if (isRahulDeyAdmin) {
-        const isUnderRahee = parentId ? (isRoot || await isFolderUnderBranch(parentId, 'RAHEE')) : true;
-        const isUnderIrcon = parentId ? await isFolderUnderBranch(parentId, 'IRCON') : false;
-        if (!isUnderRahee || isUnderIrcon) {
+        const isUnderRahee = await isFolderUnderBranch(parentId, 'RAHEE');
+        if (!isUnderRahee) {
           return res.status(403).json({
             success: false,
-            message: 'Forbidden: As Rahee Admin, folder creation must be under Bikramshila root or the RAHEE directory branch.'
+            message: 'Forbidden: As Rahee Admin, folder creation is strictly restricted to the RAHEE directory branch (Bikramshila root is restricted).'
           });
         }
       } else if (isOmJhaAdmin) {
-        const isUnderIrcon = parentId ? (isRoot || await isFolderUnderBranch(parentId, 'IRCON')) : true;
-        const isUnderRahee = parentId ? await isFolderUnderBranch(parentId, 'RAHEE') : false;
-        if (!isUnderIrcon || isUnderRahee) {
+        const isUnderIrcon = await isFolderUnderBranch(parentId, 'IRCON');
+        if (!isUnderIrcon) {
           return res.status(403).json({
             success: false,
-            message: 'Forbidden: As Ircon Admin, folder creation must be under Bikramshila root or the IRCON directory branch.'
+            message: 'Forbidden: As Ircon Admin, folder creation is strictly restricted to the IRCON directory branch (Bikramshila root is restricted).'
           });
         }
       }
@@ -326,12 +330,8 @@ async function updateFolderPermissions(req, res) {
       return res.status(404).json({ success: false, message: 'Folder not found.' });
     }
 
-    const isCompany1Admin = [2, 3].includes(req.user.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN'].includes(req.user.role_name);
-    const isCompany2Admin = req.user.role_id === 8 || req.user.role_name === 'IRCON_ADMIN_REVIEWER';
-    const isSuperAdmin = req.user.is_super_admin || req.user.role_id === 1;
-
-    if (!isCompany1Admin && !isCompany2Admin && !isSuperAdmin) {
-      return res.status(403).json({ success: false, message: 'Forbidden: Access control configuration is restricted to Company Admins.' });
+    if (!req.user.is_super_admin) {
+      return res.status(403).json({ success: false, message: 'Forbidden: Access control configuration is strictly restricted to Super Admin ONLY.' });
     }
 
     // Determine target folder IDs (single folder or recursive subfolders)

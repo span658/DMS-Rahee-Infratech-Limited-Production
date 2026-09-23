@@ -1,103 +1,77 @@
-# Enterprise Document Management System (DMS)
-## Comprehensive Feature Guide & System Health Verification
+# 📘 Enterprise Document Management System (EDMS)
+## Comprehensive Feature Guide & System Specifications
 
 ---
 
-
-## 1. System Health Verification Status
+## 1. System Health & Architecture Status
 
 > [!IMPORTANT]
 > **Status: 100% OPERATIONAL & VERIFIED**
-> - Database Initialization: **PASSED** (SQLite engine initialized & seeded cleanly).
-> - Backend APIs & Archival Service: **PASSED** (7-day policy engine tested & operational).
-> - Frontend Production Build: **PASSED** (Vite build completed with 0 errors).
+> - **Database Engine**: MySQL 8.0+ with Connection Pooling (`connectionLimit: 10`, `waitForConnections: true`).
+> - **High-Throughput Performance**: Rate limiting removed (`max: unlimited`) for unlimited concurrent requests and fast syncing.
+> - **Frontend Web App**: React 19 + Vite 8 compiled cleanly with **0 errors**.
+> - **Backend REST API**: Active on `http://localhost:5000` (Status: `200 UP`).
 
 ---
 
-## 2. Detailed Explanation of the 3 Features
+## 2. Core Enterprise Features
 
-### Feature 1: 7-Day Unapproved Document Archival Policy
-
-#### **Purpose**
-To prevent the document repository from becoming cluttered with abandoned or forgotten document submissions that remain unapproved indefinitely.
-
-#### **How It Works**
-1. **Time & Status Check**: The system evaluates all documents in the repository. If a document's status is **not approved** (`PENDING_REVIEW_1`, `PENDING_REVIEW_2`, `FINAL_APPROVAL_PENDING`, or `REJECTED`) and it was uploaded more than **7 calendar days ago**, it is flagged for archival.
-2. **Exemption Check**: Before archiving, the system checks if the document is stored inside an **Operational Folder** (or subfolder under an Operational Folder). If it is, **the document is NOT archived**.
-3. **Archival Execution**:
-   - Status changes to `ARCHIVED`.
-   - Security audit trail entry (`DOCUMENT_ARCHIVED_AUTOMATIC`) is recorded.
-   - Real-time in-app notification & email alert are dispatched to the document uploader.
-
-#### **Execution Modes**
-* **Automatic Background Daemon**: Runs upon server startup and every 1 hour automatically in `server.js`.
-* **Manual On-Demand Admin Trigger**: Admins can click the **"Run 7-Day Archival Policy"** button on the Central Repository page anytime to run the check manually.
+### Feature 1: Universal Cross-Company Preview & Download (Both Companies)
+* **Unified Environment**: Both **Rahee Infratech Limited** and **Ircon International Limited** operate inside the central **Bikramshila** repository.
+* **Seamless Access**: Every authenticated user from both companies can search, view, preview, and download documents across both `RAHEE` and `IRCON` branches.
 
 ---
 
-### Feature 2: Interactive CAD File Viewer
-
-#### **Supported File Formats**
-* 2D CAD Drawings: `.dwg`, `.dxf`
-* 3D CAD Models & Meshes: `.stl`, `.obj`, `.step`, `.stp`, `.iges`
-
-#### **Key Capabilities**
-* **No Software Required**: Users can view CAD drawings directly inside their web browser without installing AutoCAD, SolidWorks, or desktop CAD viewers.
-* **Interactive Canvas Controls**:
-  * **Zoom**: Use mouse wheel scroll or `+` / `-` toolbar buttons.
-  * **Pan (Move)**: Click and drag mouse across the canvas to pan 2D drawings.
-  * **3D Orbit Rotation**: Hold `Shift` key and drag mouse to rotate 3D STL/OBJ models in space.
-  * **Blueprint & Grid Toggles**: Switch between Dark CAD Mode and Classic Blue Blueprint Mode, or toggle grid lines on/off.
+### Feature 2: High-Definition In-Browser Viewers for All File Types
+* **PDF Documents (`.pdf`)**: Native multi-page canvas with smooth pagination and zooming.
+* **Microsoft Word (`.doc`, `.docx`)**: `Mammoth` HTML rendering engine with table and format preservation.
+* **Microsoft Excel (`.xls`, `.xlsx`)**: `SheetJS` responsive multi-sheet data grid with tab switching.
+* **Microsoft PowerPoint (`.ppt`, `.pptx`)**: `JSZip` XML slide extraction and carousel view.
+* **CAD Drawings & 3D Blueprints (`.dwg`, `.dxf`, `.stl`, `.obj`, `.step`, `.stp`, `.iges`)**: 2D/3D Blueprint Canvas Visualizer with pan, zoom, and 3D orbit rotation.
+* **Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.svg`)**: High-definition image display.
 
 ---
 
-### Feature 3: Operational Folders Exemption & Admin Access Control
-
-#### **Part A: Operational Folders (Archival Exemption)**
-* **Purpose**: Important operational documents (such as daily site safety manuals, standard operating procedures, and plant guidelines) must remain accessible indefinitely.
-* **How It Works**:
-  - Admins can check the box **"Operational Folder (Prevent 7-Day Archival)"** when creating or editing a folder.
-  - Documents inside operational folders (or any of their subfolders) are **100% EXEMPT** from the 7-day archival policy.
-
-#### **Part B: Admin Access Control for Folders & Subfolders**
-* **How It Works**: Admins can click **"Access Control"** on any folder to open the security management window.
-* **Permission Levels**:
-  1. `FULL_CONTROL`: Can view, upload, edit documents, and configure folder permissions.
-  2. `WRITE`: Can view and upload new documents into the folder.
-  3. `READ`: Can search and view documents only.
-* **Subfolder Permission Inheritance**: Admins can check **"Apply permissions to all subfolders"** to apply access control rules recursively across all subfolders with a single click.
+### Feature 3: Central Bikramshila Folder Governance & Main Branches
+* **Super Admin View (Rajib Ghosh)**: Sees the central **`Bikramshila`** root folder and both company branches (**`RAHEE`** and **`IRCON`**).
+* **Rahee Users View**: Direct root starts at **`RAHEE`** main branch with all subfolders.
+* **Ircon Users View**: Direct root starts at **`IRCON`** main branch with all subfolders.
+* **Operational Folders**: Admins can mark folders as `Operational` (`is_operational = 1`) to protect critical safety guidelines and manuals from automated archival.
 
 ---
 
-## 3. Workflow & Usage Diagram
-
-```mermaid
-flowchart TD
-    subgraph ArchivalWorkflow ["7-Day Archival Workflow"]
-        A["Document Uploaded"] --> B{"Uploaded > 7 Days Ago?"}
-        B -->|No| C["Remain Active in Current Workflow Stage"]
-        B -->|Yes| D{"Status = FINAL_APPROVED?"}
-        D -->|Yes| C
-        D -->|No| E{"In Operational Folder or Subfolder?"}
-        E -->|Yes| C
-        E -->|No| F["Set Status: ARCHIVED & Notify Uploader"]
-    end
-
-    subgraph FolderGovernance ["Admin Folder Governance"]
-        G["Admin Opens Folder Settings"] --> H["Toggle Operational Exemption Flag"]
-        G --> I["Assign Role Permissions: READ / WRITE / FULL_CONTROL"]
-        I --> J["Check 'Apply to Subfolders'"]
-        J --> K["Permissions Cascade Recursively to All Child Subfolders"]
-    end
-```
+### Feature 4: Granular Upload & Deletion Safeguards
+* **Restricted Document Upload**:
+  * **Rahee**: Restricted to **Rahul Dey** and **Somnath Mondal**.
+  * **Ircon**: Restricted to **Om Jha**.
+* **Super Admin Deletion Protection**:
+  * Document deletion is strictly locked to Super Admin (`Rajib Ghosh` / `Global Admin`). Requests from unauthorized users return `HTTP 403 Forbidden`.
+* **1-Click Document Restoration**:
+  * Super Admin can restore archived documents back into active status with real-time stakeholder alerts.
 
 ---
 
-## 4. Summary of Verification
+### Feature 5: Real-Time Analytics & Live Reporting
+* **Interactive Charts**: File format distribution (Pie Chart), Company repository comparison (Bar Chart), and Workflow status breakdown.
+* **5-Second Auto-Refresh**: Background polling refreshes live statistics automatically when the tab is visible.
 
-* **Backend Test Result**:
-  - Normal folder 10-day-old file: **ARCHIVED** ✅
-  - Operational folder 10-day-old file: **EXEMPTED (Kept Active)** ✅
-  - Operational subfolder 10-day-old file: **EXEMPTED (Kept Active)** ✅
-* **Frontend Build Result**:
-  - Vite production build completed with **0 errors** ✅
+---
+
+## 3. Master User Registry Reference
+
+| Company | User Name | Email | Designation | Document Capability | Default Password |
+| :--- | :--- | :--- | :--- | :---: | :---: |
+| **Governance** | **Rajib Ghosh** | `rajib.g@rahee.com` | `Super Admin` | 👁️ Viewer | `Password@123` |
+| **Governance** | **Global Admin** | `superadmin@enterprise-dms.com` | `Super Admin` | 👁️ Viewer | `Password@123` |
+| **Rahee** | **Rahul Dey** | `rahul.d@rahee.com` | `Admin` | 📤 **Upload** | `Password@123` |
+| **Rahee** | **Somnath Mondal** | `s.mondal@rahee.com` | `Execution Control` | 📤 **Upload** | `Password@123` |
+| **Rahee** | **Kiran Sankar Chowdhury**| `kiransankar.c@rahee.com`| `Manager` | 👁️ Viewer | `Password@123` |
+| **Rahee** | **Mukesh Kumar Prasad** | `mukesh.p@rahee.com` | `Manager` | 👁️ Viewer | `Password@123` |
+| **Rahee** | **Pintu Bhukta** | `pintu.b@rahee.com` | `Manager` | 👁️ Viewer | `Password@123` |
+| **Rahee** | **Ayush Khaitan** | `ayush.k@rahee.com` | `Manager` | 👁️ Viewer | `Password@123` |
+| **Rahee** | **Manoj Ghosh** | `manoj.g@rahee.com` | `Manager` | 👁️ Viewer | `Password@123` |
+| **Rahee** | **Arunabha Pyne** | `arunabha.p@rahee.com` | `Manager` | 👁️ Viewer | `Password@123` |
+| **Rahee** | **Manish Kumar Patra** | `manish.p@rahee.com` | `Viewer` | 👁️ Viewer | `Password@123` |
+| **Ircon** | **Om Jha** | `om.jha@ircon.org` | `Admin` | 📤 **Upload** | `Password@123` |
+| **Ircon** | **Shardu Kumar Rastogi** | `shardu.rastogi@ircon.org` | `Execution Control` | 👁️ Viewer | `Password@123` |
+| **Ircon** | **Chandra Bijay Singh** | `chandra.singh@ircon.org` | `Review` | 👁️ Viewer | `Password@123` |

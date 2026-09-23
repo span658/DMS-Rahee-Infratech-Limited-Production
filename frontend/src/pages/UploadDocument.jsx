@@ -314,73 +314,24 @@ export default function UploadDocument() {
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Target Folder (Filtered by Document Type)
+                Target Destination Folder <span className="text-rose-500">*</span>
               </label>
               <select
                 value={folderId}
                 onChange={(e) => setFolderId(e.target.value)}
+                required
                 className="w-full p-3 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium text-slate-900"
               >
-                <option value="">📁 Auto-Assign Company Subfolder (Bikramshila/{(user?.organization_id === 2 || user?.role_name === 'IRCON_ADMIN_REVIEWER' || user?.role_name === 'IRCON_ADMIN' || user?.email?.toLowerCase().startsWith('om.jha@')) ? 'IRCON' : 'RAHEE'})</option>
-
+                <option value="">-- Select Destination Folder --</option>
                 {(() => {
-                  let filteredFolders = folders;
-                  if (!user?.is_super_admin) {
-                    const isIrconUser = user?.organization_id === 2 || user?.role_name === 'IRCON_ADMIN_REVIEWER' || user?.role_name === 'IRCON_ADMIN' || user?.email?.toLowerCase().startsWith('om.jha@');
-                    const myBranch = isIrconUser ? 'IRCON' : 'RAHEE';
-                    
-                    // Show ONLY user's own main company folder (RAHEE or IRCON) and its subfolders
-                    filteredFolders = folders.filter(f => {
-                      const fName = (f.name || '').toUpperCase();
-                      const parentName = (f.parent_folder_name || '').toUpperCase();
-                      if (fName === myBranch || parentName === myBranch) return true;
-                      return false;
-                    });
-                  }
-
-                  const allFormattedFolders = getFormattedFolderList(filteredFolders);
-                  const matchingFolders = allFormattedFolders.filter(f => {
-                    const fNameLower = (f.name || '').toLowerCase();
-                    if (documentType === 'CAD') {
-                      return fNameLower.includes('cad') || fNameLower.includes('engineering') || fNameLower.includes('project') || fNameLower.includes('drawing') || fNameLower.includes('spec');
-                    } else if (documentType === 'PDF') {
-                      return fNameLower.includes('pdf') || fNameLower.includes('doc') || fNameLower.includes('report') || fNameLower.includes('audit');
-                    } else if (documentType === 'WORD') {
-                      return fNameLower.includes('word') || fNameLower.includes('doc') || fNameLower.includes('contract') || fNameLower.includes('draft');
-                    } else if (documentType === 'EXCEL') {
-                      return fNameLower.includes('excel') || fNameLower.includes('sheet') || fNameLower.includes('finance') || fNameLower.includes('audit');
-                    } else if (documentType === 'POWERPOINT') {
-                      return fNameLower.includes('powerpoint') || fNameLower.includes('ppt') || fNameLower.includes('presentation');
-                    } else if (documentType === 'IMAGE') {
-                      return fNameLower.includes('image') || fNameLower.includes('photo') || fNameLower.includes('site');
-                    }
-                    return true;
-                  });
-
-                  const otherFolders = allFormattedFolders.filter(f => !matchingFolders.some(m => m.id === f.id));
-
-                  return (
-                    <>
-                      {matchingFolders.length > 0 && (
-                        <optgroup label={`🎯 Recommended Storage Folders for ${documentType} Files`}>
-                          {matchingFolders.map(f => (
-                            <option key={f.id} value={f.id}>
-                              {f.displayName}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {otherFolders.length > 0 && (
-                        <optgroup label="📁 Storage Folders">
-                          {otherFolders.map(f => (
-                            <option key={f.id} value={f.id}>
-                              {f.displayName}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </>
-                  );
+                  const isIrconUser = user?.organization_id === 2 || user?.role_name === 'IRCON_ADMIN_REVIEWER' || user?.role_name === 'IRCON_ADMIN' || user?.email?.toLowerCase().startsWith('om.jha@');
+                  const myBranch = isIrconUser ? 'IRCON' : 'RAHEE';
+                  const allFormattedFolders = user?.is_super_admin ? getFormattedFolderList(folders) : getFormattedFolderList(folders, myBranch);
+                  return allFormattedFolders.map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.displayName}
+                    </option>
+                  ));
                 })()}
               </select>
             </div>

@@ -161,15 +161,15 @@ async function uploadDocument(req, res) {
       if (folderIdToUse) {
         const isUnderOwnBranch = await isFolderUnderBranch(folderIdToUse, userBranch);
         if (!isUnderOwnBranch) {
-          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-          return res.status(403).json({
-            success: false,
-            message: `Forbidden: As ${userBranch} Admin/Uploader, document upload is strictly restricted to subfolders under your designated company directory (Bikramshila/${userBranch}).`
-          });
+          // If specified folder ID is not under branch or not found, safely fallback to company branch root folder
+          const defaultSub = await db.query('SELECT id FROM folders WHERE UPPER(name) = ?', [userBranch]);
+          if (defaultSub && defaultSub.length > 0) {
+            folderIdToUse = defaultSub[0].id;
+          }
         }
       } else {
         // Auto-assign default dedicated company subfolder under Bikramshila
-        const defaultSub = await db.query('SELECT id FROM folders WHERE UPPER(name) = ? AND parent_id IS NOT NULL', [userBranch]);
+        const defaultSub = await db.query('SELECT id FROM folders WHERE UPPER(name) = ?', [userBranch]);
         if (defaultSub && defaultSub.length > 0) {
           folderIdToUse = defaultSub[0].id;
         }
@@ -269,8 +269,11 @@ async function uploadDocument(req, res) {
       status: initialStatus
     });
   } catch (err) {
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
+    }
     console.error('Document Upload Error:', err);
-    return res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message || 'An error occurred during upload.' });
   }
 }
 
@@ -302,13 +305,27 @@ async function getDocuments(req, res) {
       params.push(req.query.organization_id);
     }
 
-    // Folder filter
+    // Folder filter (includes target folder AND any nested child subfolders)
     if (req.query.folder_id) {
       if (req.query.folder_id === 'uncategorized') {
         whereClauses.push('(d.folder_id IS NULL OR d.folder_id = 0)');
       } else {
-        whereClauses.push('d.folder_id = ?');
-        params.push(req.query.folder_id);
+        const rootFolderId = parseInt(req.query.folder_id);
+        // Recursive helper to get all subfolder IDs under the selected folder
+        const allTargetFolderIds = [rootFolderId];
+        const queue = [rootFolderId];
+        while (queue.length > 0) {
+          const currentParentId = queue.shift();
+          const children = await db.query('SELECT id FROM folders WHERE parent_id = ?', [currentParentId]);
+          for (const child of children) {
+            allTargetFolderIds.push(child.id);
+            queue.push(child.id);
+          }
+        }
+
+        const placeholders = allTargetFolderIds.map(() => '?').join(',');
+        whereClauses.push(`d.folder_id IN (${placeholders})`);
+        params.push(...allTargetFolderIds);
       }
     }
 

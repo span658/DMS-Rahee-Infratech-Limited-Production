@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 const path = require('path');
 
 const authRoutes = require('./routes/auth.routes');
@@ -24,23 +23,15 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: true, // Mirrors the incoming request origin dynamically (allows localhost & 127.0.0.1 with credentials)
+  origin: true, // Mirrors incoming request origin dynamically
   credentials: true
 }));
-
-// Rate Limiter
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // limit each IP to 300 requests per windowMs
-  message: { success: false, message: 'Too many requests from this IP, please try again after 15 minutes.' }
-});
-app.use('/api/', limiter);
 
 // Body Parser
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve Uploads Directory statically if needed
+// Serve Uploads Directory statically
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Root & Health Check Endpoints

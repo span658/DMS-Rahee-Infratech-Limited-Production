@@ -52,31 +52,34 @@ async function initDatabase() {
 
 async function seedBksFolders() {
   try {
-    const existingBks = await query("SELECT id, name FROM folders WHERE UPPER(name) IN ('BIKRAMSHILA', 'BKS') AND parent_id IS NULL");
+    // 1. Ensure Bikramshila root folder exists
+    const existingBks = await query("SELECT id, name FROM folders WHERE UPPER(name) IN ('BIKRAMSHILA', 'BKS')");
     let bksId;
     if (!existingBks || existingBks.length === 0) {
-      const res = await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (1, 'Bikramshila', 'Main Central Bikramshila Folder Directory', NULL, 0)");
+      const res = await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (1, 'Bikramshila', 'Main Central Bikramshila Root Directory', NULL, 0)");
       bksId = res.insertId;
       console.log('Seeded root Bikramshila folder with ID:', bksId);
     } else {
       bksId = existingBks[0].id;
-      if (existingBks[0].name !== 'Bikramshila') {
-        await query("UPDATE folders SET name = 'Bikramshila', description = 'Main Central Bikramshila Folder Directory' WHERE id = ?", [bksId]);
-      }
+      await query("UPDATE folders SET name = 'Bikramshila', description = 'Main Central Bikramshila Root Directory', parent_id = NULL WHERE id = ?", [bksId]);
     }
 
-    // Seed IRCON subfolder under Bikramshila
-    const existingIrcon = await query("SELECT id FROM folders WHERE UPPER(name) = 'IRCON' AND parent_id = ?", [bksId]);
-    if (!existingIrcon || existingIrcon.length === 0) {
-      await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (2, 'IRCON', 'Ircon International Limited Documents', ?, 0)", [bksId]);
-      console.log('Seeded IRCON subfolder under Bikramshila');
-    }
-
-    // Seed RAHEE subfolder under Bikramshila
-    const existingRahee = await query("SELECT id FROM folders WHERE UPPER(name) = 'RAHEE' AND parent_id = ?", [bksId]);
+    // 2. Seed / Ensure RAHEE branch under Bikramshila
+    const existingRahee = await query("SELECT id FROM folders WHERE UPPER(name) = 'RAHEE'");
     if (!existingRahee || existingRahee.length === 0) {
-      await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (1, 'RAHEE', 'Rahee Infratech Limited Documents', ?, 0)", [bksId]);
-      console.log('Seeded RAHEE subfolder under Bikramshila');
+      await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (1, 'RAHEE', 'Rahee Infratech Limited Branch Directory', ?, 0)", [bksId]);
+      console.log('Seeded RAHEE branch under Bikramshila');
+    } else {
+      await query("UPDATE folders SET parent_id = ? WHERE UPPER(name) = 'RAHEE'", [bksId]);
+    }
+
+    // 3. Seed / Ensure IRCON branch under Bikramshila
+    const existingIrcon = await query("SELECT id FROM folders WHERE UPPER(name) = 'IRCON'");
+    if (!existingIrcon || existingIrcon.length === 0) {
+      await query("INSERT INTO folders (organization_id, name, description, parent_id, is_operational) VALUES (2, 'IRCON', 'Ircon International Limited Branch Directory', ?, 0)", [bksId]);
+      console.log('Seeded IRCON branch under Bikramshila');
+    } else {
+      await query("UPDATE folders SET parent_id = ? WHERE UPPER(name) = 'IRCON'", [bksId]);
     }
   } catch (e) {
     console.warn('Bikramshila folder seeding warning:', e.message);
@@ -358,7 +361,7 @@ async function seedInitialData() {
   ];
 
   for (const r of roles) {
-    await query('INSERT INTO roles (id, name, description) VALUES (?, ?, ?)', [r.id, r.name, r.description]);
+    await query('INSERT IGNORE INTO roles (id, name, description) VALUES (?, ?, ?)', [r.id, r.name, r.description]);
   }
 
   // 2. Permission Keys
@@ -376,13 +379,13 @@ async function seedInitialData() {
   ];
 
   for (const p of permissions) {
-    await query('INSERT INTO permissions (id, code, description) VALUES (?, ?, ?)', [p.id, p.code, p.description]);
+    await query('INSERT IGNORE INTO permissions (id, code, description) VALUES (?, ?, ?)', [p.id, p.code, p.description]);
   }
 
   // Role Permissions Mapping helper
   const addRolePermissions = async (roleId, permIds) => {
     for (const pid of permIds) {
-      await query('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [roleId, pid]);
+      await query('INSERT IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [roleId, pid]);
     }
   };
 
@@ -404,10 +407,10 @@ async function seedInitialData() {
   await addRolePermissions(8, [1, 2, 3, 4, 5, 6, 9, 10, 11]);
 
   // 3. Organizations
-  await query('INSERT INTO organizations (id, name, code, status) VALUES (?, ?, ?, ?)', [
+  await query('INSERT IGNORE INTO organizations (id, name, code, status) VALUES (?, ?, ?, ?)', [
     1, 'Rahee Infratech Limited', 'RAHEE', 'ACTIVE'
   ]);
-  await query('INSERT INTO organizations (id, name, code, status) VALUES (?, ?, ?, ?)', [
+  await query('INSERT IGNORE INTO organizations (id, name, code, status) VALUES (?, ?, ?, ?)', [
     2, 'Ircon International Limited', 'IRCON', 'ACTIVE'
   ]);
 

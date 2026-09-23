@@ -14,7 +14,7 @@ async function authenticateToken(req, res, next) {
     
     // Retrieve fresh user info from DB to verify status and permissions
     const users = await db.query(
-      `SELECT u.id, u.organization_id, u.name, u.email, u.status, u.role_id, r.name as role_name, o.name as organization_name, o.code as organization_code
+      `SELECT u.id, u.organization_id, u.name, u.email, u.status, u.role_id, u.designation, u.document_capability, r.name as role_name, o.name as organization_name, o.code as organization_code
        FROM users u
        LEFT JOIN roles r ON u.role_id = r.id
        LEFT JOIN organizations o ON u.organization_id = o.id
@@ -49,6 +49,8 @@ async function authenticateToken(req, res, next) {
       email: user.email,
       role_id: user.role_id,
       role_name: user.role_name,
+      designation: user.designation,
+      document_capability: user.document_capability,
       is_super_admin: user.role_id === 1 || user.role_name === 'SUPER_ADMIN',
       permissions: permissions.map(p => p.code)
     };

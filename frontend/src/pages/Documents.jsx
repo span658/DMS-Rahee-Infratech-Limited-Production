@@ -119,52 +119,27 @@ export default function Documents() {
         setSystemUsers(res.data.users || []);
       }
     }).catch(err => console.warn(err));
+
+    // Live Real-Time Polling: automatically sync folders every 5 seconds when tab is active
+    const liveInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchFolders();
+      }
+    }, 5000);
+
+    return () => clearInterval(liveInterval);
   }, []);
 
   useEffect(() => {
     fetchDocuments();
   }, [search, statusFilter, typeFilter, selectedFolderId]);
 
-  const formattedFolders = getFormattedFolderList(folders);
-
   const isIrconUser = user?.organization_id === 2 || user?.role_name === 'IRCON_ADMIN_REVIEWER' || user?.role_name === 'IRCON_ADMIN' || user?.email?.toLowerCase().startsWith('om.jha@');
   const isRaheeUser = user?.organization_id === 1 || user?.role_name === 'RAHEE_ADMIN_REVIEWER' || user?.role_name === 'RAHEE_EXEC_ADMIN' || user?.email?.toLowerCase().startsWith('rahul.d@') || user?.email?.toLowerCase().startsWith('s.mondal@');
 
-  const creatableParentFolders = (() => {
-    if (user?.is_super_admin) {
-      return formattedFolders;
-    }
-    const myBranch = isIrconUser ? 'IRCON' : (isRaheeUser ? 'RAHEE' : '');
-    const otherBranch = isIrconUser ? 'RAHEE' : (isRaheeUser ? 'IRCON' : '');
-
-    if (!myBranch) return formattedFolders;
-
-    // Filter to ONLY Bikramshila root, own company branch folder, and its subfolders.
-    // Exclude other company branch folders (e.g. exclude IRCON for RAHEE users, exclude RAHEE for IRCON users).
-    const allowedFolders = folders.filter(f => {
-      const fName = (f.name || '').toUpperCase();
-      const parentName = (f.parent_folder_name || '').toUpperCase();
-
-      // Explicitly exclude the other company's branch and its children
-      if (fName === otherBranch || parentName === otherBranch) {
-        return false;
-      }
-
-      // Allow Bikramshila root folder
-      if (!f.parent_id || fName === 'BIKRAMSHILA') {
-        return true;
-      }
-
-      // Allow own company branch and subfolders under own branch
-      if (fName === myBranch || parentName === myBranch) {
-        return true;
-      }
-
-      return false;
-    });
-
-    return getFormattedFolderList(allowedFolders);
-  })();
+  const myBranch = isIrconUser ? 'IRCON' : (isRaheeUser ? 'RAHEE' : '');
+  const formattedFolders = user?.is_super_admin ? getFormattedFolderList(folders) : getFormattedFolderList(folders, myBranch);
+  const creatableParentFolders = formattedFolders;
 
   useEffect(() => {
     if (showFolderModal && creatableParentFolders.length > 0) {
@@ -208,8 +183,6 @@ export default function Documents() {
         fetchFolders();
         if (res.data.folder) {
           setSelectedFolderId(res.data.folder.id);
-          // Automatically open Access Control modal right after creation!
-          handleOpenFolderAccessControl(res.data.folder);
         }
       }
     } catch (err) {
@@ -538,7 +511,7 @@ export default function Documents() {
             onChange={(e) => setSelectedFolderId(e.target.value)}
             className="px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white text-slate-700 font-bold"
           >
-            <option value="">📁 All Folders ({folders.reduce((acc, f) => acc + (f.document_count || 0), 0)})</option>
+            <option value="">📁 All Folders ({formattedFolders.reduce((acc, f) => acc + (f.direct_document_count || 0), 0)})</option>
             {formattedFolders.map(f => (
               <option key={f.id} value={f.id}>
                 {f.displayName} ({f.document_count || 0}) {f.is_operational ? '🛡️ [Operational]' : ''}
@@ -546,10 +519,10 @@ export default function Documents() {
             ))}
           </select>
 
-          {isCompanyAdmin && currentSelectedFolderObj && (
+          {user?.is_super_admin && currentSelectedFolderObj && (
             <button
               onClick={() => handleOpenFolderAccessControl(currentSelectedFolderObj)}
-              title="Manage Folder Settings & Access Control Permissions"
+              title="Manage Folder Settings & Access Control Permissions (Super Admin Only)"
               className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-300 transition flex items-center space-x-1 text-xs font-semibold shrink-0"
             >
               <Settings className="w-4 h-4 text-slate-600" />

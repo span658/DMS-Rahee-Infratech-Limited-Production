@@ -7,7 +7,7 @@ const { MULTI_TENANT_ISOLATION_ENABLED } = require('../config/workflow.config');
 async function getUsers(req, res) {
   try {
     let sql = `
-      SELECT u.id, u.organization_id, u.name, u.email, u.status, u.role_id, u.created_at,
+      SELECT u.id, u.organization_id, u.name, u.email, u.status, u.role_id, u.designation, u.document_capability, u.created_at,
              r.name as role_name, r.description as role_description,
              o.name as organization_name, o.code as organization_code
       FROM users u
@@ -36,7 +36,7 @@ async function getUsers(req, res) {
 
 async function createUser(req, res) {
   try {
-    const { name, email, password, role_id, organization_id } = req.body;
+    const { name, email, password, role_id, organization_id, designation, document_capability } = req.body;
 
     // STRICT RULE: The Super-Admin holds complete executive authority and is strictly responsible for creating users for both companies in the system.
     if (!req.user.is_super_admin) {
@@ -62,9 +62,9 @@ async function createUser(req, res) {
     const password_hash = await bcrypt.hash(password, 10);
 
     const result = await db.query(
-      `INSERT INTO users (organization_id, name, email, password_hash, role_id, status)
-       VALUES (?, ?, ?, ?, ?, 'ACTIVE')`,
-      [targetOrgId, name.trim(), email.trim().toLowerCase(), password_hash, parseInt(role_id)]
+      `INSERT INTO users (organization_id, name, email, password_hash, role_id, designation, document_capability, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+      [targetOrgId, name.trim(), email.trim().toLowerCase(), password_hash, parseInt(role_id), designation || 'Manager', document_capability || 'Viewer']
     );
 
     const newUserId = result.insertId;

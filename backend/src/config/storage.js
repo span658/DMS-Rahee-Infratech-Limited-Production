@@ -70,10 +70,8 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({
   storage: storage,
-  fileFilter: fileFilter,
-  limits: {
-    fileSize: 25 * 1024 * 1024 // 25 MB max limit
-  }
+  fileFilter: fileFilter
+  // No artificial file size limits — storage is bounded only by available disk space
 });
 
 // Helper function to calculate SHA-256 file hash

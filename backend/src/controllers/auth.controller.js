@@ -144,6 +144,8 @@ async function login(req, res) {
         email: user.email,
         role_id: user.role_id,
         role_name: user.role_name,
+        designation: user.designation,
+        document_capability: user.document_capability,
         organization_id: user.organization_id,
         organization_name: user.organization_name,
         organization_code: user.organization_code,

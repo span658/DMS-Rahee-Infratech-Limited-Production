@@ -19,11 +19,11 @@ export default function Sidebar() {
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
     { to: '/documents', label: 'Document Repository', icon: FileText, show: true },
     { to: '/reviews', label: 'Workflow Reviews', icon: CheckSquare, show: false },
-    { to: '/users', label: 'Users & Roles', icon: Users, show: user?.is_super_admin },
+    { to: '/users', label: 'Users & Roles', icon: Users, show: true },
     { to: '/organizations', label: 'Tenant Organizations', icon: Building2, show: user?.is_super_admin },
     { to: '/reports', label: 'Analytics & Reports', icon: BarChart3, show: true },
     { to: '/emails', label: 'Email Outbox Logs', icon: Mail, show: true },
-    { to: '/audit-logs', label: 'System Audit Logs', icon: ShieldCheck, show: hasPermission('view_audit_logs') }
+    { to: '/audit-logs', label: 'System Audit Logs', icon: ShieldCheck, show: true }
   ];
 
   return (
