@@ -12,14 +12,15 @@
 4. [Granular Role-Based Access Control (RBAC) Matrix](#4-granular-role-based-access-control-rbac-matrix)
 5. [Document Upload Notification Routing Engine](#5-document-upload-notification-routing-engine)
 6. [Cross-Company Universal Preview & Direct Download Policy](#6-cross-company-universal-preview--direct-download-policy)
-7. [Security Governance & Document Deletion Protection](#7-security-governance--document-deletion-protection)
-8. [Document Archival & 1-Click Restoration Policy](#8-document-archival--1-click-restoration-policy)
-9. [Supported Document Formats & In-Browser Viewers](#9-supported-document-formats--in-browser-viewers)
-10. [Live Analytics & Interactive Reporting Engine](#10-live-analytics--interactive-reporting-engine)
-11. [Central Workflow Configuration](#11-central-workflow-configuration)
-12. [Database Schema & Seeding Guide](#12-database-schema--seeding-guide)
-13. [Installation & Startup Guide](#13-installation--startup-guide)
-14. [Complete REST API Reference](#14-complete-rest-api-reference)
+7. [Document Types & Smart Auto-Detection Dropdown](#7-document-types--smart-auto-detection-dropdown)
+8. [Unlimited Storage & High-Throughput Performance](#8-unlimited-storage--high-throughput-performance)
+9. [Security Governance & Document Deletion Protection](#9-security-governance--document-deletion-protection)
+10. [Document Archival & 1-Click Restoration Policy](#10-document-archival--1-click-restoration-policy)
+11. [Supported Document Formats & In-Browser Viewers](#11-supported-document-formats--in-browser-viewers)
+12. [Live Analytics & Interactive Reporting Engine](#12-live-analytics--interactive-reporting-engine)
+13. [Database Resilience & Zero-Crash Architecture](#13-database-resilience--zero-crash-architecture)
+14. [Installation & Startup Guide](#14-installation--startup-guide)
+15. [Complete REST API Reference](#15-complete-rest-api-reference)
 
 ---
 
@@ -31,13 +32,13 @@ The Enterprise Document Management System (EDMS) is a centralized, high-throughp
 Enterprises Document Management System/
 ├── backend/
 │   ├── src/
-│   │   ├── config/              # MySQL2 connection pool, Multer streaming storage, JWT, Email, Workflow toggles
+│   │   ├── config/              # MySQL2 connection pool (30 pool limit, heartbeat), Multer streaming storage, JWT, Email
 │   │   ├── controllers/         # Document, Folder, User, Report, Audit, Notification
 │   │   ├── middleware/          # JWT Authentication, RBAC permission validator, Multer error handler
 │   │   ├── routes/              # Express 5 REST API routes
 │   │   ├── services/            # Notification dispatcher, Audit logging, Archival daemon
-│   │   └── app.js               # Express application with zero rate-limit blocks
-│   ├── uploads/                 # Secure disk filesystem for documents & CAD drawings
+│   │   └── app.js               # Express application with generous 500MB payload limits
+│   ├── uploads/                 # Secure disk filesystem for documents & CAD drawings (Unlimited capacity)
 │   ├── schema.sql               # MySQL master database schema & seed
 │   └── server.js                # HTTP + Socket.IO server & auto-port recovery
 │
@@ -46,6 +47,7 @@ Enterprises Document Management System/
 │   │   ├── components/          # DocumentPreviewModal (CAD/Office/PDF), Navbar, Sidebar
 │   │   ├── context/             # AuthContext, NotificationContext
 │   │   ├── pages/               # Dashboard, Documents, Upload, Detail, Users, Reports, AuditLogs
+│   │   ├── services/            # Dynamic api.js host resolver (supports localhost, LAN IP, domains)
 │   │   └── routes/              # Protected routing & RBAC navigation
 │   └── package.json             # Frontend dependencies
 ```
@@ -53,12 +55,12 @@ Enterprises Document Management System/
 ### **Core Stack Components**
 * **Frontend**: React 19, Vite 8, Tailwind CSS, Lucide Icons, Recharts, Socket.IO Client.
 * **Backend**: Node.js, Express 5, MySQL2 (`mysql2/promise`), Socket.IO 4, Multer, Helmet, BcryptJS, JSONWebToken, Mammoth, SheetJS (`xlsx`), JSZip.
-* **Database Engine**: MySQL 8.0+ with Connection Pooling (`connectionLimit: 10`, `waitForConnections: true`, `enableKeepAlive: true`).
-* **High-Throughput Performance**: Rate limiting removed (`max: unlimited`) to eliminate HTTP 429 bottlenecks during continuous multi-user synchronization.
+* **Database Engine**: MySQL 8.0+ with High-Resilience Connection Pooling (`connectionLimit: 30`, `maxIdle: 10`, `waitForConnections: true`, `enableKeepAlive: true`, `connectTimeout: 20000`).
+* **High-Throughput Performance**: Rate limiting removed (`max: unlimited`) and generous 500MB payload support for seamless large file processing.
 
 ---
 
-## 2. Central Bikramshila Directory & Company Branch Hierarchy
+## 2. Central Bikramshila Directory & Folder Hierarchy
 
 All documents, blueprints, and folders are structured under the primary **Bikramshila** root repository, governed by Super Admin (**Rajib Ghosh**):
 
@@ -87,11 +89,11 @@ All documents, blueprints, and folders are structured under the primary **Bikram
 
 ## 3. Master User Registry, Designations & Capabilities Matrix
 
-The system includes 13 designated stakeholder accounts plus the Super Administrator governance account:
+The system includes 14 designated stakeholder accounts:
 
 ### 🏢 **Rahee Infratech Limited (`RAHEE`)**
 | Sl | User Name | Email ID | Designation | Document Capability | Official Password |
-| :---: | :--- | :--- | :--- | :---: | :---: |
+| :---: | :--- | :--- | :--- | :---: | :--- |
 | **1** | **Rahul Dey** | `rahul.d@rahee.com` | **Admin** | 📤 **Upload** | `R@hul#Dey2026` |
 | **2** | **Somnath Mondal** | `s.mondal@rahee.com` | **Execution Control** | 📤 **Upload** | `S@menath#Mondal2026` |
 | **3** | **Kiran Sankar Chowdhury** | `kiransankar.c@rahee.com` | **Manager** | 👁️ **Viewer** | `K1ran#Sankar2026` |
@@ -104,15 +106,15 @@ The system includes 13 designated stakeholder accounts plus the Super Administra
 
 ### 🏢 **Ircon International Limited (`IRCON`)**
 | Sl | User Name | Email ID | Designation | Document Capability | Official Password |
-| :---: | :--- | :--- | :--- | :---: | :---: |
+| :---: | :--- | :--- | :--- | :---: | :--- |
 | **1** | **Om Jha** | `om.jha@ircon.org` | **Admin** | 📤 **Upload** | `Om#Jha2026` |
 | **2** | **Shardu Kumar Rastogi** | `shardu.rastogi@ircon.org` | **Execution Control** | 👁️ **Viewer** | `Sh@rdu#Rastogi2026` |
 | **3** | **Chandra Bijay Singh** | `chandra.singh@ircon.org` | **Review** | 👁️ **Viewer** | `Ch@ndra#Singh2026` |
 
 ### 🌐 **Super Administrator Governance Accounts**
 | Sl | User Name | Email ID | Designation | Document Capability | Official Password | Governance Privileges |
-| :---: | :--- | :--- | :--- | :---: | :---: | :--- |
-| **1** | **Rajib Ghosh** | `rajib.g@rahee.com` | **Super Admin** | 👁️ **Viewer** | `R@jib#Ghosh2026` | User Management, Archival Policy, Document Restoration, Permanent Deletion |
+| :---: | :--- | :--- | :--- | :---: | :--- | :--- |
+| **1** | **Rajib Ghosh** | `rajib.g@rahee.com` | **Super Admin** | 👁️ **Viewer** | `R@jib#Ghosh2026` | User Creation & Management, Archival Policy, Document Restoration, Permanent Deletion |
 | **2** | **Global System Admin** | `superadmin@enterprise-dms.com` | **Super Admin** | 👁️ **Viewer** | `SuperAdmin@123Sec` | Master Governance & System Configuration |
 
 ---
@@ -152,32 +154,51 @@ When a document is uploaded, real-time in-app notifications and email logs are d
 
 ## 6. Cross-Company Universal Preview & Direct Download Policy
 
-* **Universal Visibility**: `MULTI_TENANT_ISOLATION_ENABLED = false` permits all authenticated users from **Rahee Infratech** and **Ircon International** to search, open, preview, and download documents across both organizations in the central repository.
+* **Universal Visibility**: All authenticated users from **Rahee Infratech** and **Ircon International** can search, open, preview, and download documents across both organizations in the central repository.
 * **Streamed Binary Delivery**: High-capacity documents and large CAD models stream directly from the disk filesystem (`backend/uploads/`) with zero memory leakage.
 
 ---
 
-## 7. Security Governance & Document Deletion Protection
+## 7. Document Types & Smart Auto-Detection Dropdown
 
-* **Super Admin Deletion Lock (`ONLY_SUPER_ADMIN_CAN_DELETE = true`)**:
+The upload form contains a clear dropdown with the following options:
+* `-- Select Document Type --` (Placeholder)
+* 📄 **PDF Document** (`.pdf`)
+* 📐 **CAD Drawing / 3D Model** (`.dwg`, `.dxf`, `.stl`, `.obj`, `.step`, `.stp`, `.iges`)
+* 📊 **Microsoft PowerPoint / PPT** (`.ppt`, `.pptx`)
+* 🖼️ **Image** (`.jpg`, `.jpeg`, `.png`, `.webp`, `.svg`)
+* 📝 **Microsoft Word** (`.doc`, `.docx`)
+* 📊 **Microsoft Excel** (`.xls`, `.xlsx`)
+
+* **Smart Automatic Detection**: Selecting or dropping any file automatically detects its format, selects the right type in the dropdown, and cleans up the document title.
+
+---
+
+## 8. Unlimited Storage & High-Throughput Performance
+
+* **Zero Artificial Limits**: Files are stored directly on disk without artificial size caps.
+* **Generous Body Parser**: Express body parsers configured with `500mb` limits.
+* **Anti-Malware Security**: Prohibits dangerous executable formats (`.exe`, `.bat`, `.cmd`, `.sh`, `.vbs`, `.msi`, `.dll`).
+
+---
+
+## 9. Security Governance & Document Deletion Protection
+
+* **Super Admin Deletion Lock**:
   * Only **Rajib Ghosh** and the **Global System Administrator** have the authority to delete documents from the repository.
-  * For all other users (Admins, Managers, Execution Control, Viewers), delete buttons are disabled in the UI and requests to `DELETE /api/documents/:id` return **`HTTP 403 Forbidden`**.
+  * For all other users, requests to `DELETE /api/documents/:id` return **`HTTP 403 Forbidden`**.
 * **Immutable Security Audit Trail**: Every deletion event logs the document ID, title, deleting user, timestamp, and IP address to `audit_logs`.
 
 ---
 
-## 8. Document Archival & 1-Click Restoration Policy
+## 10. Document Archival & 1-Click Restoration Policy
 
-* **Manual Document Archival (`POST /api/documents/:id/archive`)**:
-  * Super Admin can archive inactive documents.
-* **1-Click Document Restoration (`POST /api/documents/:id/restore`)**:
-  * Super Admin can restore any archived document back into active status in the Bikramshila folder hierarchy.
-* **Automated Archival Policy Scanner (`POST /api/documents/policy/archival/run`)**:
-  * Scans for inactive documents and moves them to the archive. Folders marked as `is_operational = 1` are protected from automated archival.
+* **Manual Document Archival (`POST /api/documents/:id/archive`)**: Super Admin can archive inactive documents.
+* **1-Click Document Restoration (`POST /api/documents/:id/restore`)**: Super Admin can restore any archived document back into active status in the Bikramshila folder hierarchy.
 
 ---
 
-## 9. Supported Document Formats & In-Browser Viewers
+## 11. Supported Document Formats & In-Browser Viewers
 
 | Category | Supported File Extensions | Rendering Technology |
 | :--- | :--- | :--- |
@@ -190,76 +211,36 @@ When a document is uploaded, real-time in-app notifications and email logs are d
 
 ---
 
-## 10. Live Analytics & Interactive Reporting Engine
+## 12. Live Analytics & Interactive Reporting Engine
 
 Located at `/reports` and `/dashboard`:
 1. **Document Types Breakdown (Interactive Pie Chart)**: Live distribution of PDF, Word, Excel, PowerPoint, CAD, and Image files.
 2. **Company Document Distribution (Bar Chart)**: Compares document counts under **Rahee Infratech** vs **Ircon International**.
-3. **Workflow Status Breakdown**: Tracks documents in `FINAL_APPROVED`, `PENDING_REVIEW`, or `REJECTED` states.
+3. **Workflow Status Breakdown**: Tracks documents across review states.
 4. **Auto-Refresh Engine**: Polls every 5 seconds when the browser tab is active, with an on-demand manual refresh button.
 
 ---
 
-## 11. Central Workflow Configuration
+## 13. Database Resilience & Zero-Crash Architecture
 
-System toggles are centralized in [`backend/src/config/workflow.config.js`](backend/src/config/workflow.config.js):
-
-```javascript
-module.exports = {
-  // Bypasses multi-stage review for instant availability
-  WORKFLOW_REVIEW_ENABLED: false,
-
-  // Universal cross-visibility for Rahee & Ircon users across Bikramshila
-  MULTI_TENANT_ISOLATION_ENABLED: false,
-
-  // 7-day archival policy daemon toggle
-  ARCHIVAL_POLICY_ENABLED: false,
-
-  // Operational folder protection toggle
-  OPERATIONAL_FOLDER_ENABLED: false,
-
-  // Static V1.0 version tagging mode
-  STATIC_VERSION_V1_ONLY: true,
-
-  // Strictly restrict document deletion to Super Admin ONLY
-  ONLY_SUPER_ADMIN_CAN_DELETE: true,
-
-  // Bikramshila directory tree mode
-  BKS_FOLDER_MODE: true,
-
-  // Allow Company Admins to create subfolders under their branch
-  ADMIN_FOLDER_CREATION_ENABLED: true
-};
-```
+* **MySQL Connection Pool**: 30 connections with keep-alive packets and 20s timeout.
+* **Self-Healing Auto-Retry**: Transient connection drops automatically retry up to 2 times without failing requests.
+* **45-Second Heartbeat**: Background pings ensure database connections remain warm and prevent timeout drops.
+* **Dynamic Host Resolution**: Frontend adapts to localhost, LAN IP, or domains automatically.
 
 ---
 
-## 12. Database Schema & Seeding Guide
-
-The database can be initialized using [`backend/schema.sql`](backend/schema.sql):
-
-```powershell
-mysql -u root -p enterprise_dms < "C:\Users\Admin\Desktop\Enterprises Document Management System\backend\schema.sql"
-```
-
-The schema creates:
-* 13 core database tables (`organizations`, `roles`, `permissions`, `role_permissions`, `users`, `folders`, `folder_permissions`, `documents`, `document_versions`, `document_reviews`, `audit_logs`, `notifications`, `email_logs`).
-* Bikramshila root directory and company subfolders.
-* All 13 official user accounts with verified Bcrypt hashed passwords (`Password@123`).
-
----
-
-## 13. Installation & Startup Guide
+## 14. Installation & Startup Guide
 
 ### Prerequisites
-* **Node.js**: v18.0.0 or higher (v20+ LTS recommended).
+* **Node.js**: v18.0.0 or higher.
 * **MySQL Server**: v8.0 or higher.
 
 ### 1. Backend Service
 ```powershell
 cd backend
 npm install
-node server.js
+npm start
 ```
 * **API Base URL**: `http://localhost:5000`
 * **Health Check**: `http://localhost:5000/api/health`
@@ -274,7 +255,7 @@ npm run dev
 
 ---
 
-## 14. Complete REST API Reference
+## 15. Complete REST API Reference
 
 | Category | Method | Endpoint | Description | Access Requirement |
 | :--- | :--- | :--- | :--- | :--- |

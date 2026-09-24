@@ -76,8 +76,8 @@ export default function Documents() {
 
   // STRICT RULE: Folder Creation is PERMITTED for Company Admins & Super Admin.
   const isCompanyAdmin = user?.is_super_admin || 
-    [1, 2, 3, 8].includes(user?.role_id) || 
-    ['SUPER_ADMIN', 'RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN', 'IRCON_ADMIN_REVIEWER'].includes(user?.role_name);
+    [1, 2, 8].includes(user?.role_id) || 
+    ['SUPER_ADMIN', 'RAHEE_ADMIN', 'IRCON_ADMIN'].includes(user?.role_name);
 
   const fetchFolders = async () => {
     try {
@@ -224,13 +224,10 @@ export default function Documents() {
       }
       const roleNameMap = {
         1: 'SUPER_ADMIN',
-        2: 'RAHEE_ADMIN_REVIEWER',
-        3: 'RAHEE_EXEC_ADMIN',
-        4: 'STEP2_REVIEWER',
-        5: 'FINAL_APPROVER',
+        2: 'RAHEE_ADMIN',
         6: 'MANAGER_OVERSIGHT',
         7: 'DOCUMENT_UPLOADER',
-        8: 'IRCON_ADMIN_REVIEWER'
+        8: 'IRCON_ADMIN'
       };
 
       const newRule = {
@@ -869,14 +866,11 @@ export default function Documents() {
                   >
                     <option value="">Select Role or User Account to Assign Access...</option>
                     <optgroup label="System Roles">
-                      <option value="role:1">SUPER_ADMIN (Global Administrator)</option>
-                      <option value="role:2">RAHEE_ADMIN_REVIEWER (Company 1 Admin - Rahul Dey)</option>
-                      <option value="role:3">RAHEE_EXEC_ADMIN (Executive Admin - Rajib Ghosh)</option>
-                      <option value="role:4">STEP2_REVIEWER (Stage 2 Reviewer - Kiran Sankar)</option>
-                      <option value="role:5">FINAL_APPROVER (Stage 3 Approver - Manoj Ghosh)</option>
-                      <option value="role:6">MANAGER_OVERSIGHT (Departmental Managers)</option>
-                      <option value="role:7">DOCUMENT_UPLOADER (Document Uploaders - Om Jha)</option>
-                      <option value="role:8">IRCON_ADMIN_REVIEWER (Company 2 Admin - Shardu Rastogi)</option>
+                      <option value="role:1">SUPER_ADMIN (Super Admin - Rajib Ghosh)</option>
+                      <option value="role:2">RAHEE_ADMIN (Rahee Admin - Rahul Dey)</option>
+                      <option value="role:7">DOCUMENT_UPLOADER (Execution Control - Somnath Mondal)</option>
+                      <option value="role:8">IRCON_ADMIN (Ircon Admin - Om Jha)</option>
+                      <option value="role:6">MANAGER_OVERSIGHT (Managers & Viewers)</option>
                     </optgroup>
                     {systemUsers && systemUsers.length > 0 && (
                       <optgroup label="Individual User Accounts">

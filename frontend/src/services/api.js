@@ -1,13 +1,16 @@
 import axios from 'axios';
 
-// Backend API Base URL (configured via Vite environment variable with safe fallback)
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+// Dynamically resolve backend host based on current browser location hostname (supports localhost, LAN IP, or domain)
+const defaultHost = typeof window !== 'undefined' && window.location && window.location.hostname ? window.location.hostname : 'localhost';
 
-// Socket.IO Server URL (configured via Vite env or derived from API_BASE_URL)
+// Backend API Base URL (configured via Vite environment variable with safe dynamic fallback)
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `http://${defaultHost}:5000/api`;
+
+// Socket.IO Server URL (configured via Vite env or derived dynamically from API_BASE_URL)
 export const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (
   import.meta.env.VITE_API_BASE_URL
     ? import.meta.env.VITE_API_BASE_URL.replace(/\/api\/?$/, '')
-    : 'http://localhost:5000'
+    : `http://${defaultHost}:5000`
 );
 
 const api = axios.create({

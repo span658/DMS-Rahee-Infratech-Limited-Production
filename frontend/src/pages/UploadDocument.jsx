@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import api from '../services/api';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate, Link } from 'react-router-dom';
 import { Upload, FileText, AlertCircle, CheckCircle, ShieldAlert, ArrowLeft, ExternalLink, Layers } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getFormattedFolderList } from '../utils/folderUtils';
 import StatusBadge from '../components/StatusBadge';
 
 export default function UploadDocument() {
   const { user } = useAuth();
+
+  // Super Admin is Viewer only - cannot upload documents
+  if (user?.is_super_admin) {
+    return <Navigate to="/documents" replace />;
+  }
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [documentType, setDocumentType] = useState('PDF');
+  const [documentType, setDocumentType] = useState('');
   const [file, setFile] = useState(null);
   const [folders, setFolders] = useState([]);
   const [folderId, setFolderId] = useState('');
@@ -31,7 +35,10 @@ export default function UploadDocument() {
   }, []);
 
   useEffect(() => {
-    if (!documentType) return;
+    if (!documentType) {
+      setExistingDocs([]);
+      return;
+    }
     setLoadingExistingDocs(true);
     api.get(`/documents?document_type=${documentType}`)
       .then(res => {
@@ -104,18 +111,18 @@ export default function UploadDocument() {
     switch (type) {
       case 'PDF':
         return '.pdf,application/pdf';
-      case 'WORD':
-        return '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'EXCEL':
-        return '.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'CAD':
+        return '.dwg,.dxf,.stl,.obj,.step,.stp,.iges';
       case 'POWERPOINT':
         return '.ppt,.pptx,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation';
       case 'IMAGE':
         return '.jpg,.jpeg,.png,.webp,.svg,image/*';
-      case 'CAD':
-        return '.dwg,.dxf,.stl,.obj,.step,.stp,.iges';
+      case 'WORD':
+        return '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'EXCEL':
+        return '.xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       default:
-        return '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.dwg,.dxf,.stl,.obj,.step,.stp,.iges';
+        return '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.svg,.dwg,.dxf,.stl,.obj,.step,.stp,.iges';
     }
   };
 
@@ -123,7 +130,7 @@ export default function UploadDocument() {
     setDocumentType(newType);
     setError('');
     // Auto-clear file if mismatched with newly selected type
-    if (file) {
+    if (file && newType) {
       const ext = file.name.split('.').pop().toLowerCase();
       const rawExt = ext.toUpperCase();
       const extTypeMap = {
@@ -158,6 +165,11 @@ export default function UploadDocument() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+
+    if (!documentType) {
+      setError('Please select a Document Type from the dropdown.');
+      return;
+    }
 
     if (!file) {
       setError('Please select a valid document file to upload.');
@@ -195,11 +207,11 @@ export default function UploadDocument() {
 
     const typeLabels = {
       PDF: 'PDF Document',
-      WORD: 'Microsoft Word',
-      EXCEL: 'Microsoft Excel',
+      CAD: 'CAD Drawing / 3D Model',
       POWERPOINT: 'Microsoft PowerPoint',
       IMAGE: 'Image',
-      CAD: 'CAD Drawing / 3D Model'
+      WORD: 'Microsoft Word',
+      EXCEL: 'Microsoft Excel'
     };
 
     if (documentType !== detectedType) {
@@ -233,8 +245,8 @@ export default function UploadDocument() {
   };
 
   const userEmail = user?.email?.toLowerCase() || '';
-  const isRaheeUploader = userEmail === 'rahul.d@rahee.com' || userEmail === 's.mondal@rahee.com' || [2, 3, 7].includes(user?.role_id) || ['RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN', 'DOCUMENT_UPLOADER'].includes(user?.role_name);
-  const isIrconUploader = userEmail.startsWith('om.jha@') || user?.role_id === 8 || ['IRCON_ADMIN_REVIEWER', 'IRCON_ADMIN'].includes(user?.role_name);
+  const isRaheeUploader = userEmail === 'rahul.d@rahee.com' || userEmail === 's.mondal@rahee.com' || [2, 3, 7].includes(user?.role_id) || ['RAHEE_ADMIN', 'RAHEE_ADMIN_REVIEWER', 'RAHEE_EXEC_ADMIN', 'DOCUMENT_UPLOADER'].includes(user?.role_name);
+  const isIrconUploader = userEmail.startsWith('om.jha@') || user?.role_id === 8 || ['IRCON_ADMIN', 'IRCON_ADMIN_REVIEWER'].includes(user?.role_name);
 
   if (user?.is_super_admin || (!isRaheeUploader && !isIrconUploader)) {
     return (
@@ -296,19 +308,21 @@ export default function UploadDocument() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Document Type
+                Document Type <span className="text-rose-500">*</span>
               </label>
               <select
                 value={documentType}
                 onChange={(e) => handleTypeChange(e.target.value)}
-                className="w-full p-3 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium"
+                required
+                className="w-full p-3 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-medium text-slate-900"
               >
+                <option value="">-- Select Document Type --</option>
                 <option value="PDF">📄 PDF Document (.pdf)</option>
+                <option value="CAD">📐 CAD Drawing / 3D Model (.dwg, .dxf, .stl, .obj, .step, .stp, .iges)</option>
+                <option value="POWERPOINT">📊 Microsoft PowerPoint / PPT (.ppt, .pptx)</option>
+                <option value="IMAGE">🖼️ Image (.jpg, .jpeg, .png, .webp, .svg)</option>
                 <option value="WORD">📝 Microsoft Word (.doc, .docx)</option>
                 <option value="EXCEL">📊 Microsoft Excel (.xls, .xlsx)</option>
-                <option value="POWERPOINT">📊 Microsoft PowerPoint (.ppt, .pptx)</option>
-                <option value="IMAGE">🖼️ Image (.jpg, .png, .webp, .svg)</option>
-                <option value="CAD">📐 CAD Drawing / 3D Model (.dwg, .dxf, .stl, .obj, .step, .stp, .iges)</option>
               </select>
             </div>
 
@@ -392,15 +406,15 @@ export default function UploadDocument() {
                     <div className="inline-block px-3 py-1 bg-blue-100/70 border border-blue-200 text-blue-800 rounded-lg text-xs font-semibold">
                       🎯 File Dialog Filtered For: <strong>{
                         documentType === 'PDF' ? 'PDF Documents (.pdf)' :
+                        documentType === 'CAD' ? 'CAD Drawings & 3D Models (.dwg, .dxf, .stl, .obj, .step, .stp, .iges)' :
+                        documentType === 'POWERPOINT' ? 'Microsoft PowerPoint (.ppt, .pptx)' :
+                        documentType === 'IMAGE' ? 'Images (.jpg, .jpeg, .png, .webp, .svg)' :
                         documentType === 'WORD' ? 'Microsoft Word (.doc, .docx)' :
                         documentType === 'EXCEL' ? 'Microsoft Excel (.xls, .xlsx)' :
-                        documentType === 'POWERPOINT' ? 'Microsoft PowerPoint (.ppt, .pptx)' :
-                        documentType === 'IMAGE' ? 'Images (.jpg, .png, .webp, .svg)' :
-                        documentType === 'CAD' ? 'CAD Drawings & 3D Models (.dwg, .dxf, .stl, .obj, .step, .stp, .iges)' :
-                        'All Supported Formats'
+                        'All Supported Formats (PDF, CAD, PPT, Image, Word, Excel)'
                       }</strong>
                     </div>
-                    <p className="text-[11px] text-slate-400 italic">Max file size: 25 MB. Executables strictly prohibited.</p>
+                    <p className="text-[11px] text-slate-400 italic">Unlimited file storage & smooth uploads enabled. Executables strictly prohibited.</p>
                   </div>
                 )}
               </label>
@@ -430,69 +444,71 @@ export default function UploadDocument() {
       </div>
 
       {/* Live Preview of Existing Documents in System matching selected Document Type */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div className="flex items-center space-x-2">
-            <Layers className="w-5 h-5 text-blue-600" />
-            <h2 className="text-sm font-bold text-slate-900">
-              Existing {documentType} Documents in Repository ({existingDocs.length})
-            </h2>
-          </div>
-          <span className="text-[11px] bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg font-semibold border border-blue-100">
-            Filtered for: <strong>{documentType}</strong>
-          </span>
-        </div>
-
-        {loadingExistingDocs ? (
-          <div className="py-6 text-center text-xs text-slate-400">Loading existing {documentType} documents...</div>
-        ) : existingDocs.length === 0 ? (
-          <div className="py-6 text-center text-xs text-slate-400 italic bg-slate-50 rounded-xl border border-dashed border-slate-200">
-            No {documentType} documents uploaded yet in your organization repository.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-xs text-slate-500 mb-3">
-              Below are the current {documentType} files stored in your repository. Check to avoid duplicate uploads:
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
-              {existingDocs.slice(0, 6).map(doc => (
-                <Link
-                  key={doc.id}
-                  to={`/documents/${doc.id}`}
-                  target="_blank"
-                  className="p-3 bg-slate-50 hover:bg-blue-50/60 rounded-xl border border-slate-200 flex items-center justify-between transition group"
-                >
-                  <div className="min-w-0 flex-1 pr-2">
-                    <div className="flex items-center space-x-1.5">
-                      <p className="text-xs font-bold text-slate-800 truncate group-hover:text-blue-600 transition">
-                        {doc.title}
-                      </p>
-                      <ExternalLink className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
-                    </div>
-                    <p className="text-[11px] text-slate-500 flex items-center space-x-2 mt-1">
-                      <span className="font-semibold text-slate-600">{doc.current_version_number || 'V1'}</span>
-                      <span>&bull;</span>
-                      <span className="truncate">{doc.folder_name || '📁 Main Repository'}</span>
-                    </p>
-                  </div>
-                  <StatusBadge status={doc.status} />
-                </Link>
-              ))}
+      {documentType && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center space-x-2">
+              <Layers className="w-5 h-5 text-blue-600" />
+              <h2 className="text-sm font-bold text-slate-900">
+                Existing {documentType} Documents in Repository ({existingDocs.length})
+              </h2>
             </div>
-            {existingDocs.length > 6 && (
-              <div className="text-center pt-2 border-t border-slate-100">
-                <Link
-                  to={`/documents?document_type=${documentType}`}
-                  className="text-xs font-bold text-blue-600 hover:text-blue-800 transition inline-flex items-center space-x-1"
-                >
-                  <span>View all {existingDocs.length} {documentType} documents in Document Repository</span>
-                  <ExternalLink className="w-3 h-3" />
-                </Link>
-              </div>
-            )}
+            <span className="text-[11px] bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg font-semibold border border-blue-100">
+              Filtered for: <strong>{documentType}</strong>
+            </span>
           </div>
-        )}
-      </div>
+
+          {loadingExistingDocs ? (
+            <div className="py-6 text-center text-xs text-slate-400">Loading existing {documentType} documents...</div>
+          ) : existingDocs.length === 0 ? (
+            <div className="py-6 text-center text-xs text-slate-400 italic bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              No {documentType} documents uploaded yet in your organization repository.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500 mb-3">
+                Below are the current {documentType} files stored in your repository. Check to avoid duplicate uploads:
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
+                {existingDocs.slice(0, 6).map(doc => (
+                  <Link
+                    key={doc.id}
+                    to={`/documents/${doc.id}`}
+                    target="_blank"
+                    className="p-3 bg-slate-50 hover:bg-blue-50/60 rounded-xl border border-slate-200 flex items-center justify-between transition group"
+                  >
+                    <div className="min-w-0 flex-1 pr-2">
+                      <div className="flex items-center space-x-1.5">
+                        <p className="text-xs font-bold text-slate-800 truncate group-hover:text-blue-600 transition">
+                          {doc.title}
+                        </p>
+                        <ExternalLink className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition shrink-0" />
+                      </div>
+                      <p className="text-[11px] text-slate-500 flex items-center space-x-2 mt-1">
+                        <span className="font-semibold text-slate-600">{doc.current_version_number || 'V1'}</span>
+                        <span>&bull;</span>
+                        <span className="truncate">{doc.folder_name || '📁 Main Repository'}</span>
+                      </p>
+                    </div>
+                    <StatusBadge status={doc.status} />
+                  </Link>
+                ))}
+              </div>
+              {existingDocs.length > 6 && (
+                <div className="text-center pt-2 border-t border-slate-100">
+                  <Link
+                    to={`/documents?document_type=${documentType}`}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-800 transition inline-flex items-center space-x-1"
+                  >
+                    <span>View all {existingDocs.length} {documentType} documents in Document Repository</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
     </div>
   );

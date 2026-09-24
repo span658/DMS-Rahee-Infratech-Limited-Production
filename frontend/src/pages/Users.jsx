@@ -1,10 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Users as UsersIcon, Plus, UserCheck, UserX, Shield, Building2, X, AlertCircle } from 'lucide-react';
 
 export default function Users() {
   const { user, hasPermission } = useAuth();
+
+  // Strict Rule: User governance is exclusively restricted to Super Admin
+  if (!user?.is_super_admin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   const [usersList, setUsersList] = useState([]);
   const [roles, setRoles] = useState([]);
   const [orgs, setOrgs] = useState([]);
@@ -184,7 +191,7 @@ export default function Users() {
                 {usersList
                   .filter(u => filterOrgId === 'ALL' || (filterOrgId === '1' && (u.organization_id === 1 || u.organization_code === 'RAHEE')) || (filterOrgId === '2' && (u.organization_id === 2 || u.organization_code === 'IRCON')))
                   .map((u) => {
-                    const isUploader = u.role_name === 'DOCUMENT_UPLOADER' || u.role_name === 'RAHEE_ADMIN_REVIEWER' || u.role_name === 'IRCON_ADMIN_REVIEWER' || u.role_name === 'SUPER_ADMIN';
+                    const isUploader = u.document_capability === 'Upload' || u.role_name === 'DOCUMENT_UPLOADER' || u.role_name === 'RAHEE_ADMIN' || u.role_name === 'IRCON_ADMIN';
                     return (
                     <tr key={u.id} className="hover:bg-slate-50 transition">
                       
@@ -210,25 +217,25 @@ export default function Users() {
                       {/* Function / Designation */}
                       <td className="py-3.5 px-4">
                         <span className={`px-2.5 py-1 font-bold rounded-md text-xs border ${
-                          (u.designation === 'Admin' || u.role_name === 'RAHEE_ADMIN_REVIEWER' || u.role_name === 'IRCON_ADMIN_REVIEWER')
+                          (u.designation === 'Super Admin' || u.role_name === 'SUPER_ADMIN')
+                            ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                            : (u.designation === 'Admin' || u.role_name === 'RAHEE_ADMIN' || u.role_name === 'IRCON_ADMIN')
                             ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                             : (u.designation === 'Execution Control' || u.role_name === 'DOCUMENT_UPLOADER')
                             ? 'bg-purple-50 text-purple-800 border-purple-200'
                             : (u.designation === 'Review' || u.designation === 'Document Reviewer')
                             ? 'bg-amber-50 text-amber-800 border-amber-200'
-                            : (u.designation === 'Super Admin' || u.role_name === 'SUPER_ADMIN')
-                            ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
                             : (u.designation === 'Viewer')
                             ? 'bg-slate-100 text-slate-700 border-slate-300'
                             : 'bg-blue-50 text-blue-800 border-blue-200'
                         }`}>
-                          {u.designation || (u.role_name === 'DOCUMENT_UPLOADER' ? 'Execution Control' : u.role_name === 'MANAGER_OVERSIGHT' ? 'Manager' : u.role_name)}
+                          {u.designation || (u.role_name === 'DOCUMENT_UPLOADER' ? 'Execution Control' : u.role_name === 'SUPER_ADMIN' ? 'Super Admin' : u.role_name === 'RAHEE_ADMIN' || u.role_name === 'IRCON_ADMIN' ? 'Admin' : 'Manager')}
                         </span>
                       </td>
 
                       {/* Document Capability */}
                       <td className="py-3.5 px-4">
-                        {(u.document_capability === 'Upload' || isUploader) ? (
+                        {isUploader && u.role_name !== 'SUPER_ADMIN' ? (
                           <span className="inline-flex items-center space-x-1 px-2.5 py-1 bg-cyan-50 text-cyan-800 font-bold rounded-md text-xs border border-cyan-200">
                             <span>📤 Upload</span>
                           </span>

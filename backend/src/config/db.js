@@ -24,17 +24,33 @@ async function initDatabase() {
       password,
       database: dbName,
       waitForConnections: true,
-      connectionLimit: 10,
+      connectionLimit: 30,
+      maxIdle: 10,
+      idleTimeout: 60000,
       queueLimit: 0,
       enableKeepAlive: true,
-      keepAliveInitialDelay: 10000
+      keepAliveInitialDelay: 10000,
+      connectTimeout: 20000,
+      decimalNumbers: true
     });
 
     // Test query
     const [rows] = await mysqlPool.query('SELECT 1 + 1 AS result');
     if (rows) {
-      console.log('Successfully connected to MySQL database engine:', dbName);
+      console.log('✅ Successfully connected to MySQL database engine:', dbName);
     }
+
+    // Keep-alive heartbeat interval every 45 seconds to keep database connection pool warm
+    setInterval(async () => {
+      try {
+        if (mysqlPool) {
+          await mysqlPool.query('/* ping */ SELECT 1');
+        }
+      } catch (err) {
+        console.warn('⚠️ [MySQL Heartbeat Alert]:', err.message);
+      }
+    }, 45000);
+
   } catch (err) {
     console.error('MySQL connection failed:', err.message);
     throw new Error(`Fatal: Could not connect to MySQL database '${dbName}' on ${host}:${port}. Error: ${err.message}`);
@@ -86,13 +102,33 @@ async function seedBksFolders() {
   }
 }
 
-// Universal Query Helper (MySQL-only)
-async function query(sql, params = []) {
+// Universal Query Helper with Resilient Auto-Retry Guard
+async function query(sql, params = [], retries = 2) {
   if (!mysqlPool) {
     throw new Error('Database pool has not been initialized. Please call initDatabase() first.');
   }
-  const [results] = await mysqlPool.query(sql, params);
-  return results;
+
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    try {
+      const [results] = await mysqlPool.query(sql, params);
+      return results;
+    } catch (err) {
+      const isTransient = [
+        'PROTOCOL_CONNECTION_LOST',
+        'ECONNRESET',
+        'ETIMEDOUT',
+        'PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR',
+        'ER_LOCK_DEADLOCK'
+      ].includes(err.code);
+
+      if (isTransient && attempt <= retries) {
+        console.warn(`[MySQL Resilience] Transient error '${err.code}' on attempt ${attempt}. Retrying query in 200ms...`);
+        await new Promise(r => setTimeout(r, 200 * attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 async function createTables() {
@@ -416,24 +452,7 @@ async function seedInitialData() {
 
   // 4. Pre-hash Master User Passwords using bcrypt (salt rounds: 10)
   const hashedUsers = [
-    // Super Admin (System Level)
-    {
-      id: 1,
-      organization_id: null,
-      name: 'Global System Administrator',
-      email: 'superadmin@enterprise-dms.com',
-      password_hash: await bcrypt.hash('SuperAdmin@123Sec', 10),
-      role_id: 1
-    },
-    // Company 1: Rahee Infratech Limited Users
-    {
-      id: 5,
-      organization_id: 1,
-      name: 'Rahul Dey',
-      email: 'rahul.d@rahee.com',
-      password_hash: await bcrypt.hash('R@hul#Dey2026', 10),
-      role_id: 2 // RAHEE_ADMIN_REVIEWER: upload, view, preview, edit, download, approve_reject, view_audit_logs, view_reports
-    },
+    // Super Admin: Rajib Ghosh (Executive Super Admin)
     {
       id: 11,
       organization_id: null, // Executive Super Admin: Cross-Company Control for both Company 1 & Company 2
@@ -441,6 +460,15 @@ async function seedInitialData() {
       email: 'rajib.g@rahee.com',
       password_hash: await bcrypt.hash('R@jib#Ghosh2026', 10),
       role_id: 1 // SUPER_ADMIN: Full system control across Company 1 (Rahee) & Company 2 (Ircon)
+    },
+    // Company 1: Rahee Infratech Limited Users
+    {
+      id: 5,
+      organization_id: 1,
+      name: 'Rahul Dey',
+      email: 'rahul.d@rahee.com',
+      password_hash: await bcrypt.hash('Rahul@2026!', 10),
+      role_id: 2 // RAHEE_ADMIN
     },
     {
       id: 6,

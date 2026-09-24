@@ -1453,7 +1453,9 @@ async function archiveDocument(req, res) {
       `SELECT DISTINCT u.id, u.name, u.email, u.role_id, r.name as role_name
        FROM users u
        LEFT JOIN roles r ON u.role_id = r.id
-       WHERE u.status = 'ACTIVE'`
+       WHERE (u.organization_id = ? OR u.organization_id IS NULL OR r.name = 'SUPER_ADMIN')
+         AND u.status = 'ACTIVE'`,
+      [doc.organization_id]
     );
 
     const EXCLUDED_NOTIF_EMAILS = [
@@ -1532,12 +1534,14 @@ async function restoreDocument(req, res) {
       [restoredStatus, id]
     );
 
-    // Dispatch Live Notification to Stakeholders Across Both Companies
+    // Dispatch Live Notification to Stakeholders of the Document's Company & Super Admin
     const targetUsers = await db.query(
       `SELECT DISTINCT u.id, u.name, u.email, u.role_id, r.name as role_name
        FROM users u
        LEFT JOIN roles r ON u.role_id = r.id
-       WHERE u.status = 'ACTIVE'`
+       WHERE (u.organization_id = ? OR u.organization_id IS NULL OR r.name = 'SUPER_ADMIN')
+         AND u.status = 'ACTIVE'`,
+      [doc.organization_id]
     );
 
     const EXCLUDED_NOTIF_EMAILS = [
