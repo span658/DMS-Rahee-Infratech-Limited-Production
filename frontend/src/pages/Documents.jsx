@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import api from '../services/api';
 import StatusBadge from '../components/StatusBadge';
 import DocumentPreviewModal from '../components/DocumentPreviewModal';
@@ -17,7 +17,7 @@ import {
   Lock, 
   Folder, 
   FolderPlus, 
-  FolderOpen,
+  FolderOpen, 
   X, 
   Shield, 
   ShieldAlert, 
@@ -34,9 +34,11 @@ import {
   ArrowRight,
   ArrowUp,
   ChevronRight,
+  ChevronLeft,
   ChevronDown,
   HardDrive,
-  Calendar
+  Calendar,
+  Sparkles
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -89,6 +91,38 @@ export default function Documents() {
   const currentSelectedFolderObj = useMemo(() => {
     return folders.find(f => f.id === parseInt(selectedFolderId));
   }, [folders, selectedFolderId]);
+
+  const [recentUploadIds, setRecentUploadIds] = useState(new Set());
+
+  // 1-Minute OneDrive-style "Just Uploaded" highlight & marker lifecycle
+  useEffect(() => {
+    const updateRecentUploads = () => {
+      try {
+        const stored = localStorage.getItem('dms_recent_uploads');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const now = Date.now();
+          const ONE_MINUTE_MS = 60 * 1000;
+          if (parsed.timestamp && (now - parsed.timestamp) < ONE_MINUTE_MS) {
+            const idList = (parsed.ids || []).map(id => String(id));
+            setRecentUploadIds(new Set(idList));
+            return;
+          } else if (parsed.timestamp && (now - parsed.timestamp) >= ONE_MINUTE_MS) {
+            localStorage.removeItem('dms_recent_uploads');
+          }
+        }
+      } catch (e) {}
+      setRecentUploadIds(new Set());
+    };
+
+    updateRecentUploads();
+    const interval = setInterval(updateRecentUploads, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const isRecentlyUploaded = (docId) => {
+    return recentUploadIds.has(String(docId));
+  };
 
   // Client-side strict tab filtering to guarantee active vs archive separation
   const displayedDocuments = useMemo(() => {
@@ -248,6 +282,49 @@ export default function Documents() {
 
     return trail;
   }, [selectedFolderId, folders]);
+
+  // Breadcrumb Horizontal Overflow & Arrow Scrolling
+  const breadcrumbContainerRef = useRef(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkBreadcrumbScroll = () => {
+    const el = breadcrumbContainerRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    setCanScrollLeft(scrollLeft > 4);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
+  };
+
+  const scrollBreadcrumbLeft = () => {
+    if (breadcrumbContainerRef.current) {
+      breadcrumbContainerRef.current.scrollBy({ left: -160, behavior: 'smooth' });
+    }
+  };
+
+  const scrollBreadcrumbRight = () => {
+    if (breadcrumbContainerRef.current) {
+      breadcrumbContainerRef.current.scrollBy({ left: 160, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    const timer1 = setTimeout(() => {
+      checkBreadcrumbScroll();
+      const el = breadcrumbContainerRef.current;
+      if (el) {
+        el.scrollTo({ left: el.scrollWidth, behavior: 'smooth' });
+      }
+    }, 50);
+
+    const timer2 = setTimeout(checkBreadcrumbScroll, 200);
+    window.addEventListener('resize', checkBreadcrumbScroll);
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      window.removeEventListener('resize', checkBreadcrumbScroll);
+    };
+  }, [breadcrumbTrail, selectedFolderId]);
 
   // Folder Creation Modal state
   const [showFolderModal, setShowFolderModal] = useState(false);
@@ -792,7 +869,7 @@ export default function Documents() {
     }
     const confirmed = await showConfirm({
       title: 'Delete Document',
-      message: `Are you sure you want to move document "${doc.title}" to the Recycle Bin? Super Admin (Rajib Ghosh) can restore it to this exact directory at any time.`,
+      message: `Are you sure you want to move document "${doc.title}" to the Recycle Bin? Super Admin can restore it to this exact directory at any time.`,
       confirmText: 'Move to Recycle Bin',
       isDanger: true
     });
@@ -1021,10 +1098,27 @@ export default function Documents() {
           </button>
         </div>
 
-        {/* Explorer Address Bar with Clickable Breadcrumbs */}
-        <div className="flex-1 flex items-center justify-between h-7 px-2.5 bg-slate-50 hover:bg-white border border-slate-300 hover:border-blue-400 focus-within:border-blue-500 rounded-lg transition overflow-x-auto overflow-y-hidden">
+        {/* Explorer Address Bar with Clickable Breadcrumbs & Horizontal Arrow Navigation */}
+        <div className="flex-1 flex items-center h-7 px-1.5 bg-slate-50 hover:bg-white border border-slate-300 hover:border-blue-400 focus-within:border-blue-500 rounded-lg transition min-w-0 relative">
           
-          <div className="flex items-center space-x-1 min-w-0 flex-1">
+          {/* Left Arrow Button (Appears when breadcrumbs are scrolled right) */}
+          {canScrollLeft && (
+            <button
+              type="button"
+              onClick={scrollBreadcrumbLeft}
+              title="Scroll breadcrumbs left"
+              className="p-0.5 text-slate-600 hover:text-blue-700 hover:bg-blue-50 rounded shrink-0 transition mr-1 bg-white border border-slate-300 shadow-2xs"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* Scrollable Breadcrumbs Container without scrollbar */}
+          <div 
+            ref={breadcrumbContainerRef}
+            onScroll={checkBreadcrumbScroll}
+            className="flex items-center space-x-1 flex-1 min-w-0 overflow-x-auto overflow-y-hidden scroll-smooth no-scrollbar"
+          >
             {/* Root Drive / Bikramshila Drive Icon */}
             <button
               type="button"
@@ -1064,8 +1158,20 @@ export default function Documents() {
             })}
           </div>
 
+          {/* Right Arrow Button (Appears when breadcrumbs overflow to the right) */}
+          {canScrollRight && (
+            <button
+              type="button"
+              onClick={scrollBreadcrumbRight}
+              title="Scroll breadcrumbs right"
+              className="p-0.5 text-slate-600 hover:text-blue-700 hover:bg-blue-50 rounded shrink-0 transition ml-1 bg-white border border-slate-300 shadow-2xs"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {/* Refresh Button at the right end of address bar */}
-          <div className="shrink-0 pl-1.5 flex items-center">
+          <div className="shrink-0 pl-1.5 flex items-center border-l border-slate-200 ml-1">
             <button
               type="button"
               onClick={() => {
@@ -1262,20 +1368,42 @@ export default function Documents() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {displayedDocuments.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-slate-50/80 transition">
-                    
-                    {/* Document Title & Description */}
-                    <td className="py-3.5 px-4">
-                      <div>
-                        <Link to={`/documents/${doc.id}`} className="font-bold text-slate-900 hover:text-blue-600 text-sm line-clamp-1">
-                          {doc.title}
-                        </Link>
-                        {doc.description && (
-                          <p className="text-slate-400 text-[11px] line-clamp-1 mt-0.5">{doc.description}</p>
-                        )}
-                      </div>
-                    </td>
+                {displayedDocuments.map((doc) => {
+                  const isRecent = isRecentlyUploaded(doc.id);
+                  return (
+                    <tr 
+                      key={doc.id} 
+                      className={`transition-colors duration-500 ${
+                        isRecent 
+                          ? 'bg-blue-50/70 hover:bg-blue-50 border-l-4 border-l-blue-600' 
+                          : 'hover:bg-slate-50/80'
+                      }`}
+                    >
+                      
+                      {/* Document Title & Description */}
+                      <td className="py-3.5 px-4">
+                        <div>
+                          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                            <Link to={`/documents/${doc.id}`} className="font-bold text-slate-900 hover:text-blue-600 text-sm line-clamp-1">
+                              {doc.title}
+                            </Link>
+                            
+                            {/* OneDrive-style Just Uploaded Marker (Active for 1 minute) */}
+                            {isRecent && (
+                              <span 
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 bg-blue-600 text-white text-[10px] font-extrabold rounded-full shadow-xs animate-pulse"
+                                title="✨ Just uploaded within the last 1 minute"
+                              >
+                                <Sparkles className="w-3 h-3 text-amber-300" />
+                               
+                              </span>
+                            )}
+                          </div>
+                          {doc.description && (
+                            <p className="text-slate-400 text-[11px] line-clamp-1 mt-0.5">{doc.description}</p>
+                          )}
+                        </div>
+                      </td>
 
                     {/* Document Type Badge */}
                     <td className="py-3.5 px-4">
@@ -1360,18 +1488,6 @@ export default function Documents() {
 
                               {/* Horizontal Expandable Path Bar (Exact sync with Top Navigation Bar) */}
                               <div className="bg-slate-950/90 border border-slate-800 p-2 rounded-lg font-mono text-[11px] text-slate-300 flex items-center flex-wrap gap-1">
-                                {hasHiddenAncestors && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleExpandPath(e, doc.id)}
-                                    className="px-1.5 py-0.5 bg-blue-900/50 hover:bg-blue-800/80 text-blue-300 hover:text-blue-100 rounded border border-blue-500/40 font-bold flex items-center space-x-0.5 cursor-pointer transition text-[10px]"
-                                    title="Click to expand 1 level backwards towards Root"
-                                  >
-                                    <span>...</span>
-                                    <span className="font-black text-xs">+</span>
-                                  </button>
-                                )}
-
                                 {showRoot && (
                                   <button
                                     type="button"
@@ -1391,7 +1507,7 @@ export default function Documents() {
                                   const isImmediateFolder = idx === visibleFolders.length - 1;
                                   return (
                                     <React.Fragment key={f.id}>
-                                      {(showRoot || idx > 0 || hasHiddenAncestors) && (
+                                      {(showRoot || idx > 0) && (
                                         <ChevronRight className="w-3 h-3 text-slate-600 shrink-0" />
                                       )}
                                       <button
@@ -1412,7 +1528,7 @@ export default function Documents() {
                                   );
                                 })}
 
-                                {visibleFolders.length === 0 && !hasHiddenAncestors && (
+                                {visibleFolders.length === 0 && (
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -1527,7 +1643,8 @@ export default function Documents() {
                     </td>
 
                   </tr>
-                ))}
+                );
+              })}
               </tbody>
             </table>
           </div>
@@ -1659,21 +1776,6 @@ export default function Documents() {
                   className="w-full p-3 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none font-medium text-slate-900"
                 />
               </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Folder Description
-                </label>
-                <input
-                  type="text"
-                  value={folderDesc}
-                  onChange={(e) => setFolderDesc(e.target.value)}
-                  placeholder="Optional description or context..."
-                  className="w-full p-3 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                />
-              </div>
-
-
 
               <div className="flex items-center justify-end space-x-3 pt-2">
                 <button
@@ -1943,19 +2045,6 @@ export default function Documents() {
                   required
                   autoFocus
                   placeholder="e.g. Design Specifications 2026"
-                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-900 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1.5">
-                  Folder Description (Optional)
-                </label>
-                <textarea
-                  value={newFolderDesc}
-                  onChange={(e) => setNewFolderDesc(e.target.value)}
-                  rows={2}
-                  placeholder="Brief description of documents stored in this directory..."
                   className="w-full p-2.5 border border-slate-300 rounded-xl bg-white font-medium text-slate-900 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
                 />
               </div>

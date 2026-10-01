@@ -12,11 +12,104 @@ import {
   Plus, 
   FileCheck2,
   Sparkles,
-  Layers
+  Layers,
+  Loader2,
+  ShieldCheck,
+  Zap
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getFormattedFolderList } from '../utils/folderUtils';
 import FolderTreeSelect from '../components/FolderTreeSelect';
+
+// Dedicated Smooth High-Speed Uploading Animation Overlay
+function UploadingAnimationModal({ loading, progress, stage, stats, totalFiles, documentType }) {
+  if (!loading) return null;
+
+  const isDone = stage === 'done';
+  const loadedMB = (stats.loaded / 1024 / 1024).toFixed(2);
+  const totalMB = (stats.total / 1024 / 1024).toFixed(2);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-150">
+      <div className="bg-slate-900 border border-slate-700/80 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl text-center space-y-6 text-white relative overflow-hidden">
+        
+        {/* Ambient Glowing Background */}
+        <div className={`absolute -top-24 -left-24 w-48 h-48 ${isDone ? 'bg-emerald-500/20' : 'bg-blue-500/20'} rounded-full blur-3xl pointer-events-none transition-colors duration-300`}></div>
+        <div className={`absolute -bottom-24 -right-24 w-48 h-48 ${isDone ? 'bg-teal-500/20' : 'bg-indigo-500/20'} rounded-full blur-3xl pointer-events-none transition-colors duration-300`}></div>
+
+        {/* Dynamic Graphic Art Animation */}
+        <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+          {/* Outer Pulsing Radar Ring */}
+          <div className={`absolute inset-0 rounded-full ${isDone ? 'bg-emerald-500/10 border-2 border-emerald-500/30' : 'bg-blue-500/10 border-2 border-blue-500/30'} animate-ping opacity-60`}></div>
+          
+          {/* Rotating Gradient Spinner Ring */}
+          {!isDone ? (
+            <div className="absolute inset-1 rounded-full border-2 border-transparent border-t-blue-500 border-r-indigo-400 animate-spin"></div>
+          ) : (
+            <div className="absolute inset-1 rounded-full border-2 border-emerald-400/60 shadow-lg shadow-emerald-500/20"></div>
+          )}
+          
+          {/* Inner Glowing Disk */}
+          <div className={`w-20 h-20 rounded-full ${isDone ? 'bg-gradient-to-tr from-emerald-950 to-slate-800 border-emerald-500/40' : 'bg-gradient-to-tr from-indigo-900/90 to-slate-800 border-slate-700'} border flex flex-col items-center justify-center shadow-inner relative z-10 transition-all duration-200`}>
+            {isDone ? (
+              <div className="animate-in zoom-in-50 duration-200">
+                <CheckCircle className="w-10 h-10 text-emerald-400 drop-shadow-lg" />
+              </div>
+            ) : (
+              <FileText className="w-8 h-8 text-blue-400 drop-shadow-md animate-pulse" />
+            )}
+          </div>
+        </div>
+
+        {/* Title & Status Text */}
+        <div className="space-y-1.5">
+          <h3 className="text-lg font-black tracking-tight text-slate-100">
+            {isDone
+              ? '🎉 Upload Complete!'
+              : stage === 'processing' 
+                ? '⚡ Finalizing & Ingesting Documents...' 
+                : `🚀 Uploading ${totalFiles} Document(s)...`}
+          </h3>
+          <p className={`text-xs ${isDone ? 'text-emerald-400 font-bold' : 'text-blue-400 font-semibold'} transition-all duration-200`}>
+            {isDone 
+              ? 'Redirecting to Central Repository...' 
+              : stage === 'processing' 
+                ? 'Ingesting metadata & real-time verification' 
+                : `${loadedMB} MB of ${totalMB} MB transferred`}
+          </p>
+        </div>
+
+        {/* Progress Bar & MegaBytes Stats */}
+        <div className="space-y-2.5 bg-slate-950/70 p-4 rounded-2xl border border-slate-800 text-left">
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="text-slate-400 font-bold">
+              {loadedMB} MB / {totalMB} MB
+            </span>
+            <span className="text-emerald-400 font-extrabold text-sm">
+              {progress}%
+            </span>
+          </div>
+
+          <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700/60">
+            <div 
+              className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 rounded-full transition-all duration-150 ease-out shadow-lg"
+              style={{ width: `${Math.max(progress, 5)}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1">
+            <span className="flex items-center space-x-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Real-Time SHA-256 Verified</span>
+            </span>
+            <span>Format: <strong className="text-slate-200">{documentType || 'Auto'}</strong></span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
 
 const EXT_TYPE_MAP = {
   PDF: 'PDF',
@@ -73,37 +166,55 @@ export default function UploadDocument() {
     return <Navigate to="/documents" replace />;
   }
 
-
   const [documentType, setDocumentType] = useState('');
   const [filesList, setFilesList] = useState([]);
   const [folders, setFolders] = useState([]);
   const [folderId, setFolderId] = useState(initialFolderParam || '');
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStage, setUploadStage] = useState('');
+  const [uploadStats, setUploadStats] = useState({ loaded: 0, total: 0 });
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
-    api.get('/folders').then(res => {
-      if (res.data.success) {
-        const folderList = res.data.folders || [];
-        setFolders(folderList);
+    let isMounted = true;
 
-        // 1. If folder_id is passed as query param (e.g. /documents/upload?folder_id=12), preselect that folder!
-        if (initialFolderParam && folderList.some(f => String(f.id) === String(initialFolderParam))) {
-          setFolderId(String(initialFolderParam));
-          return;
-        }
+    const loadFolders = async () => {
+      try {
+        const res = await api.get('/folders');
+        if (!isMounted) return;
 
-        // 2. Otherwise default to user's company branch folder
-        const isIrcon = user?.organization_id === 2 || user?.role_name === 'IRCON_ADMIN_REVIEWER' || user?.role_name === 'IRCON_ADMIN' || user?.email?.toLowerCase().startsWith('om.jha@');
-        const defaultBranch = isIrcon ? 'IRCON' : 'RAHEE';
-        const defaultFolder = folderList.find(f => f.name && f.name.toUpperCase() === defaultBranch);
-        if (defaultFolder) {
-          setFolderId(defaultFolder.id.toString());
+        if (res.data?.success) {
+          const folderList = res.data.folders || [];
+          setFolders(folderList);
+
+          // 1. If folder_id is passed as query param, preselect that folder
+          if (initialFolderParam && folderList.some(f => String(f.id) === String(initialFolderParam))) {
+            setFolderId(String(initialFolderParam));
+            return;
+          }
+
+          // 2. Otherwise default to user's company branch folder
+          const isIrcon = user?.organization_id === 2 || user?.role_name === 'IRCON_ADMIN_REVIEWER' || user?.role_name === 'IRCON_ADMIN' || user?.email?.toLowerCase().startsWith('om.jha@');
+          const defaultBranch = isIrcon ? 'IRCON' : 'RAHEE';
+          const defaultFolder = folderList.find(f => f.name && f.name.toUpperCase() === defaultBranch);
+          if (defaultFolder) {
+            setFolderId(defaultFolder.id.toString());
+          }
         }
+      } catch (err) {
+        if (!isMounted) return;
+        console.warn('Folder loading error guard:', err.message);
       }
-    }).catch(err => console.error(err));
+    };
+
+    loadFolders();
+
+    return () => {
+      isMounted = false;
+    };
   }, [user, initialFolderParam]);
 
   const getAcceptString = (type) => {
@@ -275,12 +386,13 @@ export default function UploadDocument() {
       return;
     }
 
+    const totalBytes = filesList.reduce((acc, f) => acc + f.size, 0);
+
     const formData = new FormData();
     formData.append('folder_id', folderId);
     formData.append('document_type', documentType);
     formData.append('category', 'General');
 
-    // Build metadata array
     const metadata = filesList.map((item, index) => {
       formData.append('files', item.file);
       return {
@@ -294,7 +406,6 @@ export default function UploadDocument() {
 
     formData.append('files_metadata', JSON.stringify(metadata));
 
-    // Fallback single-file field for compatibility
     if (filesList.length === 1) {
       formData.append('title', filesList[0].title.trim());
       formData.append('document_type', documentType);
@@ -302,24 +413,73 @@ export default function UploadDocument() {
 
     try {
       setLoading(true);
+      setUploadProgress(0);
+      setUploadStage('uploading');
+      setUploadStats({ loaded: 0, total: totalBytes });
+
       const res = await api.post('/documents', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percent = Math.min(Math.round((progressEvent.loaded * 100) / progressEvent.total), 99);
+            setUploadProgress(percent);
+            setUploadStats({
+              loaded: progressEvent.loaded,
+              total: progressEvent.total
+            });
+            if (percent >= 98) {
+              setUploadStage('processing');
+            }
+          }
+        }
       });
 
-      setLoading(false);
-      if (res.data.success) {
-        setSuccessMsg(res.data.message || `Successfully uploaded ${filesList.length} document(s)!`);
-        setTimeout(() => {
-          if (res.data.documentId && filesList.length === 1) {
-            navigate(`/documents/${res.data.documentId}`);
-          } else {
-            navigate('/documents');
-          }
-        }, 1200);
+      if (!res.data?.success) {
+        throw new Error(res.data?.message || 'Failed to upload document(s).');
       }
+
+      setUploadProgress(100);
+      setUploadStage('done');
+      setUploadStats({ loaded: totalBytes, total: totalBytes });
+
+      // Collect uploaded document IDs for the recent highlight badge
+      const uploadedIds = [];
+      if (Array.isArray(res.data.documents)) {
+        res.data.documents.forEach(d => {
+          if (d?.id && !uploadedIds.includes(d.id)) uploadedIds.push(d.id);
+        });
+      }
+      if (res.data.documentId && !uploadedIds.includes(res.data.documentId)) {
+        uploadedIds.push(res.data.documentId);
+      }
+
+      if (uploadedIds.length > 0) {
+        try {
+          localStorage.setItem('dms_recent_uploads', JSON.stringify({
+            ids: uploadedIds,
+            timestamp: Date.now()
+          }));
+        } catch (e) {
+          console.error('Failed to save recent uploads cache:', e);
+        }
+      }
+
+      setSuccessMsg(res.data.message || `Successfully uploaded ${filesList.length} document(s)!`);
+      
+      // Snappy completion transition before instant redirect
+      setTimeout(() => {
+        setLoading(false);
+        if (uploadedIds.length === 1 && filesList.length === 1) {
+          navigate(`/documents/${uploadedIds[0]}`);
+        } else {
+          navigate('/documents');
+        }
+      }, 300);
+
     } catch (err) {
       setLoading(false);
-      setError(err.response?.data?.message || 'Failed to upload document(s).');
+      setUploadStage('');
+      setError(err.response?.data?.message || err.message || 'Failed to upload document(s).');
     }
   };
 
@@ -346,8 +506,18 @@ export default function UploadDocument() {
   const allFormattedFolders = user?.is_super_admin ? getFormattedFolderList(folders) : getFormattedFolderList(folders, myBranch);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6 relative">
       
+      {/* Dynamic Smooth Uploading Animation Overlay */}
+      <UploadingAnimationModal 
+        loading={loading}
+        progress={uploadProgress}
+        stage={uploadStage}
+        stats={uploadStats}
+        totalFiles={filesList.length}
+        documentType={documentType}
+      />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -411,8 +581,7 @@ export default function UploadDocument() {
                 <option value="IMAGE">🖼️ Images (.jpg, .jpeg, .png, .webp, .svg)</option>
               </select>
               <p className="text-[11px] text-blue-600 font-semibold mt-1.5 flex items-center space-x-1">
-                <Sparkles className="w-3.5 h-3.5 shrink-0" />
-                <span>Filters Windows File Explorer automatically for this format</span>
+      
               </p>
             </div>
 
@@ -584,6 +753,40 @@ export default function UploadDocument() {
             </div>
           )}
 
+          {/* Real-Time Upload Progress Indicator */}
+          {loading && (
+            <div className="p-4 bg-slate-900 text-white rounded-2xl shadow-xl border border-slate-700 space-y-3 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center space-x-2.5 min-w-0 pr-2">
+                  <Loader2 className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-100 truncate">
+                      {uploadStage === 'processing' 
+                        ? '⚡ Ingesting & Validating Documents...' 
+                        : `🚀 Transferring ${filesList.length} Document(s) to Server...`}
+                    </p>
+                    <p className="text-[10px] text-slate-400 truncate">
+                      {uploadStage === 'processing'
+                        ? 'Computing SHA-256 signatures & storing database records in parallel'
+                        : `${(uploadStats.loaded / 1024 / 1024).toFixed(2)} MB of ${(uploadStats.total / 1024 / 1024).toFixed(2)} MB transferred`}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right font-mono font-black text-blue-400 text-sm shrink-0">
+                  {uploadProgress}%
+                </div>
+              </div>
+
+              {/* Animated Progress Bar */}
+              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden p-0.5 border border-slate-700">
+                <div 
+                  className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${Math.max(uploadProgress, 5)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Submit Buttons */}
           <div className="flex items-center justify-between pt-4 border-t border-slate-200">
             <Link
@@ -602,10 +805,16 @@ export default function UploadDocument() {
                   : 'bg-blue-600 hover:bg-blue-700 text-white'
               }`}
             >
-              <Upload className="w-4 h-4" />
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
               <span>
                 {loading 
-                  ? `Uploading ${filesList.length} Document(s)...` 
+                  ? uploadStage === 'processing' 
+                    ? `Processing ${filesList.length} Document(s)...`
+                    : `Uploading (${uploadProgress}%)...`
                   : filesList.length > 1 
                     ? `Upload All ${filesList.length} Documents` 
                     : 'Upload Document'}
